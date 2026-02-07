@@ -637,99 +637,160 @@ def plot_regional_summary_dashboard(result: PacificCoastResult):
     save_figure(fig, "07_regional_dashboard")
 
 
+def _run_outplanting_scenario(config, seed, outplanting_resistance):
+    """
+    Run a simulation with outplanting at year 15 in Salish Sea.
+    
+    Outplants 500 individuals per site with given resistance level
+    (all loci set to that frequency).
+    """
+    sim = PacificCoastSimulation(config, seed=seed)
+    boundaries = get_site_region_boundaries(sim.sites)
+    salish_start, salish_end = boundaries["salish_sea"]
+    outplant_year = 15
+    outplant_n = 500
+
+    result = PacificCoastResult(
+        config=config,
+        sites=sim.sites,
+        states=[],
+        larval_connectivity=sim.larval_connectivity,
+        disease_connectivity=sim.disease_connectivity,
+    )
+
+    for year in range(config.n_years):
+        # Outplant at specified year
+        if year == outplant_year:
+            for i in range(salish_start, salish_end):
+                old_pop = sim.populations[i]
+                new_pop = old_pop + outplant_n
+                if new_pop > 0:
+                    weight_old = old_pop / new_pop
+                    weight_new = outplant_n / new_pop
+                    for locus in range(config.n_loci):
+                        sim.resistance_freqs[i, locus] = (
+                            weight_old * sim.resistance_freqs[i, locus]
+                            + weight_new * outplanting_resistance
+                        )
+                sim.adults[i] += outplant_n * 0.6
+                sim.juveniles[i] += outplant_n * 0.4
+                sim.populations[i] = sim.adults[i] + sim.juveniles[i]
+
+        state = sim._simulate_year(year)
+        result.states.append(state)
+
+        if sim.populations.sum() < 1:
+            from pycnopodia.pacific_coast import PacificCoastState
+            for y in range(year + 1, config.n_years):
+                result.states.append(PacificCoastState(
+                    year=y,
+                    populations=np.zeros(sim.n_sites),
+                    resistance_freqs=np.zeros((sim.n_sites, config.n_loci)),
+                    disease_prevalence=np.zeros(sim.n_sites),
+                    temperatures=sim.temperatures.copy(),
+                    initial_populations=sim.initial_populations,
+                    locus_effects=sim.locus_effects,
+                ))
+            break
+
+    return result
+
+
 def run_intervention_comparison(seed: int = 42):
     """
     Run multiple intervention scenarios and compare.
     
     Scenarios:
-    1. No intervention
-    2. Outplanting in Salish Sea only (WA focus)
-    3. Outplanting distributed across regions
-    4. Outplanting in refugia (BC Fjords)
+    1. No intervention (baseline)
+    2. Outplanting 50% resistance (all loci at 0.50)
+    3. Outplanting 95% resistance (all loci at 0.95)
     """
     print("\n🔬 Running intervention comparison scenarios...")
     
-    # For now, run base scenario (outplanting would require extending simulation)
-    # This is a placeholder that shows what the comparison would look like
-    
     config = PacificCoastConfig()
     
-    # Run base scenario
+    # Run baseline
     print("  Running baseline (no intervention)...")
-    sim = PacificCoastSimulation(config, seed=seed)
-    result_baseline = sim.run()
+    sim_base = PacificCoastSimulation(config, seed=seed)
+    result_baseline = sim_base.run()
     
-    # For a real implementation, we'd run additional scenarios here
-    # For now, simulate what different outcomes might look like
+    # Run 50% resistance outplanting
+    print("  Running 50% resistance outplanting...")
+    result_50 = _run_outplanting_scenario(config, seed, outplanting_resistance=0.50)
     
-    trajectories = result_baseline.get_region_trajectories()
+    # Run 95% resistance outplanting
+    print("  Running 95% resistance outplanting...")
+    result_95 = _run_outplanting_scenario(config, seed, outplanting_resistance=0.95)
+    
     years = result_baseline.years
+    traj_base = result_baseline.get_region_trajectories()
+    traj_50 = result_50.get_region_trajectories()
+    traj_95 = result_95.get_region_trajectories()
     
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     
-    # --- Panel 1: Population comparison (simulated) ---
+    # Helper: mean pop ratio across regions
+    def mean_pop(traj):
+        total = np.zeros(len(years))
+        for r in REGION_ORDER:
+            total += traj[r]["population_ratio"]
+        return total / len(REGION_ORDER)
+    
+    pop_base = mean_pop(traj_base)
+    pop_50 = mean_pop(traj_50)
+    pop_95 = mean_pop(traj_95)
+    
+    # --- Panel 1: Overall population comparison ---
     ax1 = axes[0, 0]
-    
-    total_pop = np.zeros(len(years))
-    for region_id in REGION_ORDER:
-        total_pop += trajectories[region_id]["population_ratio"]
-    total_pop /= len(REGION_ORDER)
-    
-    ax1.plot(years, total_pop, label='No intervention', linewidth=2, color='black')
-    # Simulated intervention effects (would be real runs)
-    ax1.plot(years, total_pop * 1.2 + 0.05, label='Salish Sea outplanting', linewidth=2, 
-             color='purple', linestyle='--')
-    ax1.plot(years, total_pop * 1.4 + 0.08, label='Distributed outplanting', linewidth=2,
-             color='blue', linestyle=':')
-    ax1.plot(years, total_pop * 1.6 + 0.10, label='Refugia outplanting', linewidth=2,
-             color='cyan', linestyle='-.')
-    
+    ax1.plot(years, pop_base, label='No intervention', linewidth=2, color='black')
+    ax1.plot(years, pop_50, label='50% resistance outplant', linewidth=2, color='orange', linestyle='--')
+    ax1.plot(years, pop_95, label='95% resistance outplant', linewidth=2, color='green', linestyle='-.')
+    ax1.axvline(x=15, color='blue', linestyle=':', alpha=0.5, label='Outplant year')
     ax1.set_xlabel("Year", fontsize=11)
     ax1.set_ylabel("Mean Population Ratio", fontsize=11)
-    ax1.set_title("Population Under Different Interventions", fontsize=12)
-    ax1.legend()
+    ax1.set_title("Population Under Outplanting Scenarios", fontsize=12)
+    ax1.legend(fontsize=9)
     ax1.grid(True, alpha=0.3)
     ax1.set_ylim(0, 1.0)
     
     # --- Panel 2: Salish Sea focus ---
     ax2 = axes[0, 1]
-    salish_pop = trajectories["salish_sea"]["population_ratio"]
-    ax2.plot(years, salish_pop, label='Baseline', linewidth=2, color='purple')
-    ax2.plot(years, np.minimum(salish_pop * 2.0 + 0.1, 1.0), 
-             label='With outplanting', linewidth=2, color='green', linestyle='--')
+    ax2.plot(years, traj_base["salish_sea"]["population_ratio"], label='Baseline', linewidth=2, color='black')
+    ax2.plot(years, traj_50["salish_sea"]["population_ratio"], label='50% resist', linewidth=2, color='orange', linestyle='--')
+    ax2.plot(years, traj_95["salish_sea"]["population_ratio"], label='95% resist', linewidth=2, color='green', linestyle='-.')
     ax2.set_xlabel("Year", fontsize=11)
     ax2.set_ylabel("Population Ratio", fontsize=11)
-    ax2.set_title("Salish Sea (Puget Sound) - WA Focus", fontsize=12)
-    ax2.legend()
+    ax2.set_title("Salish Sea - Outplanting Target", fontsize=12)
+    ax2.legend(fontsize=9)
     ax2.grid(True, alpha=0.3)
     ax2.axhline(y=0.1, color='red', linestyle=':', alpha=0.5)
     
-    # --- Panel 3: BC Fjords (refugia) ---
+    # --- Panel 3: Resistance evolution in Salish Sea ---
     ax3 = axes[1, 0]
-    fjord_pop = trajectories["bc_fjords"]["population_ratio"]
-    ax3.plot(years, fjord_pop, label='BC Fjords', linewidth=2, color='cyan')
-    ax3.plot(years, np.minimum(fjord_pop * 1.3 + 0.15, 1.0),
-             label='With enhanced stock', linewidth=2, color='green', linestyle='--')
+    ax3.plot(years, traj_base["salish_sea"]["resistance"], label='Baseline', linewidth=2, color='black')
+    ax3.plot(years, traj_50["salish_sea"]["resistance"], label='50% resist', linewidth=2, color='orange', linestyle='--')
+    ax3.plot(years, traj_95["salish_sea"]["resistance"], label='95% resist', linewidth=2, color='green', linestyle='-.')
     ax3.set_xlabel("Year", fontsize=11)
-    ax3.set_ylabel("Population Ratio", fontsize=11)
-    ax3.set_title("BC Fjords (Refugia) - Natural Survivors", fontsize=12)
-    ax3.legend()
+    ax3.set_ylabel("Mean Resistance Frequency", fontsize=11)
+    ax3.set_title("Resistance Evolution - Salish Sea", fontsize=12)
+    ax3.legend(fontsize=9)
     ax3.grid(True, alpha=0.3)
+    ax3.set_ylim(0, 1.0)
     
     # --- Panel 4: Summary bar chart ---
     ax4 = axes[1, 1]
-    scenarios = ['No Intervention', 'Salish Sea', 'Distributed', 'Refugia']
-    final_pops = [total_pop[-1], total_pop[-1]*1.2+0.05, total_pop[-1]*1.4+0.08, total_pop[-1]*1.6+0.10]
-    colors = ['gray', 'purple', 'blue', 'cyan']
+    scenarios = ['No Intervention', '50% Resist', '95% Resist']
+    final_pops = [pop_base[-1], pop_50[-1], pop_95[-1]]
+    colors = ['gray', 'orange', 'green']
     
     bars = ax4.bar(scenarios, final_pops, color=colors, edgecolor='black')
-    ax4.set_ylabel("Final Population Ratio", fontsize=11)
-    ax4.set_title("Final Outcomes by Intervention Strategy", fontsize=12)
-    ax4.set_ylim(0, 0.5)
+    ax4.set_ylabel("Final Mean Population Ratio", fontsize=11)
+    ax4.set_title("Final Outcomes by Outplanting Resistance", fontsize=12)
+    ax4.set_ylim(0, max(final_pops) * 1.3 + 0.05)
     ax4.axhline(y=0.1, color='red', linestyle='--', label='10% threshold')
     ax4.legend()
     
-    plt.suptitle("Intervention Scenario Comparison\n(Pacific Coast Pycnopodia)", fontsize=14, y=1.02)
+    plt.suptitle("Outplanting Scenario Comparison: 50% vs 95% Resistance\n(Pacific Coast Pycnopodia)", fontsize=14, y=1.02)
     plt.tight_layout()
     save_figure(fig, "08_intervention_comparison")
 

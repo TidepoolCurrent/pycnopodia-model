@@ -239,7 +239,7 @@ class PacificCoastConfig:
     
     # Genetics
     n_loci: int = 10
-    initial_resistance_freq: float = 0.03
+    initial_resistance_freq: float = 0.02
     resistance_effect: float = 0.70
     max_resistance_freq: float = 0.95
     
