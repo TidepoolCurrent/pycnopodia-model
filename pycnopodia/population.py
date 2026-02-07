@@ -25,6 +25,11 @@ class Population:
         True = female, False = male
     alive : ndarray, shape (N,), dtype bool
         Whether individual is alive (for vectorized operations)
+        
+    Baseline tracking (for ratio calculations):
+    - N0: Initial population size at simulation start
+    - H0: Initial expected heterozygosity at simulation start
+    - All outputs expressed as ratios relative to these baselines
     """
     
     config: Config
@@ -36,6 +41,12 @@ class Population:
     # Effect sizes per locus (allows variable effects)
     locus_effects: np.ndarray = field(default=None, repr=False)
     
+    # Baseline tracking for ratio calculations
+    N0: int = 0  # Initial population size
+    H0: float = 0.0  # Initial expected heterozygosity
+    Ne_cumulative: float = 0.0  # Harmonic mean Ne tracker
+    Ne_years: int = 0  # Years of Ne accumulation
+    
     # Tracking
     year: int = 0
     
@@ -45,6 +56,11 @@ class Population:
             self._initialize_population()
         if self.locus_effects is None:
             self._initialize_locus_effects()
+        # Set baselines
+        if self.N0 == 0:
+            self.N0 = self.n
+        if self.H0 == 0.0:
+            self.H0 = self.expected_heterozygosity()
     
     def _initialize_locus_effects(self):
         """Set up per-locus effect sizes."""
@@ -120,6 +136,13 @@ class Population:
         return int(self.alive.sum())
     
     @property
+    def n_ratio(self) -> float:
+        """Population size as ratio of baseline (N/N0)."""
+        if self.N0 == 0:
+            return 0.0
+        return self.n / self.N0
+    
+    @property
     def n_adults(self) -> int:
         """Number of reproductive adults (age >= maturation_age)."""
         return int((self.alive & (self.ages >= self.config.maturation_age)).sum())
@@ -158,6 +181,31 @@ class Population:
         # Mean genotype / 2 = allele frequency
         return float(self.genomes[self.alive].mean() / 2)
     
+    def expected_heterozygosity(self) -> float:
+        """
+        Calculate expected heterozygosity (gene diversity).
+        
+        He = 2pq averaged across loci, where p = allele frequency.
+        This is the standard measure of genetic diversity.
+        """
+        if self.n == 0:
+            return 0.0
+        
+        # Calculate allele frequency at each locus
+        genomes_alive = self.genomes[self.alive]
+        p = genomes_alive.mean(axis=0) / 2  # Divide by 2 since genotype is 0/1/2
+        
+        # He = 2pq = 2p(1-p) at each locus, then average
+        he_per_locus = 2 * p * (1 - p)
+        return float(he_per_locus.mean())
+    
+    @property
+    def h_ratio(self) -> float:
+        """Heterozygosity as ratio of baseline (H/H0)."""
+        if self.H0 == 0.0:
+            return 0.0
+        return self.expected_heterozygosity() / self.H0
+    
     def effective_population_size(self, n_breeders_f: int, n_breeders_m: int) -> float:
         """
         Calculate effective population size from breeder counts.
@@ -167,6 +215,38 @@ class Population:
         if n_breeders_f + n_breeders_m == 0:
             return 0.0
         return 4 * n_breeders_f * n_breeders_m / (n_breeders_f + n_breeders_m)
+    
+    def ne_ratio(self, ne: float) -> float:
+        """
+        Calculate Ne/N ratio (genetic effective vs census).
+        
+        This ratio captures the SRS effect - lower ratios mean
+        more reproductive skew and faster genetic drift.
+        """
+        if self.n == 0:
+            return 0.0
+        return ne / self.n
+    
+    def update_cumulative_ne(self, ne: float):
+        """
+        Update cumulative Ne for long-term effective size calculation.
+        
+        Long-term Ne is the harmonic mean across generations.
+        """
+        if ne > 0:
+            self.Ne_cumulative += 1.0 / ne
+            self.Ne_years += 1
+    
+    @property
+    def long_term_ne(self) -> float:
+        """
+        Harmonic mean Ne across all years.
+        
+        This is the appropriate measure for cumulative genetic drift.
+        """
+        if self.Ne_years == 0 or self.Ne_cumulative == 0:
+            return 0.0
+        return self.Ne_years / self.Ne_cumulative
     
     def apply_mortality(self, mortality_probs: np.ndarray):
         """
@@ -219,13 +299,22 @@ class Population:
         self.alive = np.concatenate([self.alive, np.ones(len(ages), dtype=bool)])
     
     def get_summary(self) -> Dict:
-        """Get summary statistics."""
+        """Get summary statistics (ratios are primary, counts secondary)."""
         return {
-            "n_total": self.n,
-            "n_adults": self.n_adults,
-            "n_females": self.n_females,
-            "n_males": self.n_males,
-            "mean_resistance": self.mean_resistance(),
+            # Primary outputs: RATIOS
+            "n_ratio": self.n_ratio,
+            "h_ratio": self.h_ratio,
             "resistance_allele_freq": self.resistance_allele_frequency(),
-            "mean_age": float(self.ages[self.alive].mean()) if self.n > 0 else 0,
+            "mean_resistance": self.mean_resistance(),
+            
+            # Secondary: raw counts (for internal use)
+            "_n_total": self.n,
+            "_n_adults": self.n_adults,
+            "_n_females": self.n_females,
+            "_n_males": self.n_males,
+            "_mean_age": float(self.ages[self.alive].mean()) if self.n > 0 else 0,
+            
+            # Baselines (for reference)
+            "_N0": self.N0,
+            "_H0": self.H0,
         }

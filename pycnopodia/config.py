@@ -116,6 +116,10 @@ class Config:
     n_replicates: int = 200  # Number of stochastic replicates
     random_seed: Optional[int] = None  # For reproducibility
     
+    # --- Recovery Thresholds (ratio-based) ---
+    recovery_threshold: float = 0.30  # Fraction of baseline for "recovered" (30%)
+    critical_threshold: float = 0.05  # Fraction for "critical" status (5%)
+    
     def validate(self):
         """Validate parameter combinations."""
         assert 0 < self.srs_mean <= 1, "SRS mean must be in (0, 1]"

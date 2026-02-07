@@ -122,7 +122,9 @@ class TestSimulation:
         result = sim.run()
         
         assert len(result.records) == 10
-        assert result.records[0].n_total > 0
+        # Use ratio-based output (n_ratio > 0 means population exists)
+        assert result.records[0].n_ratio > 0
+        assert result.records[0]._n_total > 0  # Internal count still accessible
     
     def test_no_disease_baseline(self):
         from pycnopodia import Simulation
@@ -135,8 +137,9 @@ class TestSimulation:
         result = sim.run()
         
         # Should maintain population without disease
+        # Using ratio-based metrics
         assert not result.extinct
-        assert result.final_population > 100
+        assert result.final_n_ratio > 0.5  # Should maintain at least 50% of baseline
     
     def test_extinction_without_intervention(self):
         from pycnopodia import Simulation, Config
