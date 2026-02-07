@@ -40,29 +40,38 @@ class NetworkConfig:
     n_hubs: int = 10  # Number of hub sites (for hub network)
     n_modules: int = 10  # Number of clusters (for modular)
     
-    # Demographics (simplified from full model)
-    # Balanced for stable population without disease
-    survival_adult: float = 0.90
-    survival_juvenile: float = 0.50
+    # Demographics - HIGH SURVIVAL without disease (disease is the killer)
+    survival_adult: float = 0.95  # Very high when healthy (>3yr)
+    survival_juvenile: float = 0.60  # Reasonable juvenile survival
     maturation_years: int = 3
-    fecundity: float = 500  # Larvae per adult
-    larval_survival: float = 0.01  # Fraction surviving to settlement
     carrying_capacity_per_site: int = 1500  # Density dependence ceiling
+    
+    # Reproduction - RATIO-BASED (we don't know absolute offspring)
+    # Sweepstakes: what fraction of breeders succeed?
+    breeding_success_ratio: float = 0.08  # 8% of adults breed successfully
+    # Successful breeders produce enough to replace population at K
+    # This is implicit - we just track the ratio of successful reproduction
+    recruitment_ratio: float = 0.10  # Recruits as fraction of adult population
     
     # Allee effect
     allee_threshold: int = 50  # Below this, fertilization fails
     allee_half_sat: int = 100  # Half-saturation for fertilization
     
-    # Disease
-    disease_onset: int = 10
-    disease_mortality: float = 0.6
-    disease_peak_prevalence: float = 0.9
-    disease_endemic_prevalence: float = 0.2
-    disease_decay: float = 0.1
+    # Disease - SPREADS THROUGH NETWORK
+    disease_onset_site: int = 500  # Initial outbreak site (middle of network)
+    disease_onset_year: int = 10
+    disease_spread_rate: float = 0.3  # Probability of spreading to connected site per year
+    disease_mortality: float = 0.7  # Mortality rate when infected
+    disease_recovery_rate: float = 0.05  # Rate of becoming disease-free
+    
+    # Genetics - TRACK ALLELES PER SITE
+    n_loci: int = 10  # Resistance loci to track
+    initial_resistance_freq: float = 0.1  # Starting resistance allele frequency
+    resistance_effect: float = 0.5  # Mortality reduction for homozygous resistant
     
     # Intervention
     outplanting_per_site: int = 0  # Juveniles added per site per year
-    outplanting_sites: List[int] = field(default_factory=list)  # Which sites get outplanting
+    outplanting_sites: List[int] = field(default_factory=list)
     outplanting_start: int = 15
     
     # Simulation
@@ -192,13 +201,25 @@ def build_connectivity_matrix(config: NetworkConfig) -> np.ndarray:
 
 @dataclass
 class NetworkState:
-    """State of the network at one point in time."""
+    """
+    State of the network at one point in time.
+    
+    All metrics as RATIOS for interpretability.
+    """
     year: int
     populations: np.ndarray  # Shape: (n_sites,) - count per site
+    
+    # Genetics per site - resistance allele frequencies
+    resistance_freqs: np.ndarray = None  # Shape: (n_sites,) - mean resistance freq
+    heterozygosity: np.ndarray = None  # Shape: (n_sites,) - He per site
+    
+    # Disease per site
+    disease_prevalence: np.ndarray = None  # Shape: (n_sites,) - fraction infected
     
     # Baselines for ratio calculations
     N0_per_site: int = 1000
     N0_total: int = 1_000_000
+    H0: float = 0.18  # Initial He (at p=0.1: 2*0.1*0.9 = 0.18)
     
     @property
     def total_population(self) -> int:
@@ -233,17 +254,66 @@ class NetworkState:
         return float(occupied.mean() / self.N0_per_site)
     
     @property
+    def mean_resistance_freq(self) -> float:
+        """Network-wide mean resistance allele frequency."""
+        if self.resistance_freqs is None:
+            return 0.0
+        # Weight by population size
+        if self.total_population == 0:
+            return 0.0
+        return float(np.average(self.resistance_freqs, weights=self.populations + 1e-10))
+    
+    @property
+    def mean_heterozygosity(self) -> float:
+        """Network-wide mean heterozygosity."""
+        if self.heterozygosity is None:
+            return 0.0
+        if self.total_population == 0:
+            return 0.0
+        return float(np.average(self.heterozygosity, weights=self.populations + 1e-10))
+    
+    @property
+    def h_ratio(self) -> float:
+        """Heterozygosity as ratio of baseline."""
+        if self.H0 == 0:
+            return 0.0
+        return self.mean_heterozygosity / self.H0
+    
+    @property
+    def infected_sites_ratio(self) -> float:
+        """Fraction of sites with disease present."""
+        if self.disease_prevalence is None:
+            return 0.0
+        return float((self.disease_prevalence > 0.01).sum() / len(self.disease_prevalence))
+    
+    @property
+    def mean_disease_prevalence(self) -> float:
+        """Mean disease prevalence across infected sites."""
+        if self.disease_prevalence is None:
+            return 0.0
+        infected = self.disease_prevalence[self.disease_prevalence > 0.01]
+        if len(infected) == 0:
+            return 0.0
+        return float(infected.mean())
+    
+    @property
     def extinct(self) -> bool:
         return self.total_population == 0
     
     def get_summary(self) -> Dict:
         return {
             "year": self.year,
+            # Population ratios
             "n_ratio": self.n_ratio,
             "occupied_ratio": self.occupied_ratio,
             "mean_site_n_ratio": self.mean_site_n_ratio,
-            "min_site_n_ratio": float(self.site_n_ratios.min()),
-            "max_site_n_ratio": float(self.site_n_ratios.max()),
+            # Genetic ratios
+            "resistance_freq": self.mean_resistance_freq,
+            "h_ratio": self.h_ratio,
+            # Disease ratios
+            "infected_sites_ratio": self.infected_sites_ratio,
+            "mean_disease_prevalence": self.mean_disease_prevalence,
+            # Raw counts (internal)
             "_total_population": self.total_population,
             "_occupied_sites": self.occupied_sites,
         }
@@ -301,8 +371,12 @@ class NetworkSimulation:
     """
     Network-based metapopulation simulation.
     
-    Each site has a population count (simplified from individual-based).
-    Larvae disperse according to connectivity matrix.
+    Tracks per-site:
+    - Population (adults + juveniles)
+    - Genetics (resistance allele frequency, heterozygosity)
+    - Disease (prevalence, spreading through network)
+    
+    All outputs as RATIOS.
     """
     
     def __init__(self, config: NetworkConfig = None, seed: int = None):
@@ -318,6 +392,23 @@ class NetworkSimulation:
         # Track adults vs juveniles (simplified age structure)
         self.adults = self.populations * 0.6  # Start with 60% adults
         self.juveniles = self.populations * 0.4
+        
+        # Initialize genetics per site
+        # Resistance allele frequency (starts uniform, will diverge)
+        self.resistance_freqs = np.full(
+            self.config.n_sites, 
+            self.config.initial_resistance_freq
+        )
+        # Add small variation
+        self.resistance_freqs += self.rng.normal(0, 0.02, self.config.n_sites)
+        self.resistance_freqs = np.clip(self.resistance_freqs, 0.01, 0.99)
+        
+        # Heterozygosity per site (He = 2pq)
+        self.heterozygosity = 2 * self.resistance_freqs * (1 - self.resistance_freqs)
+        self.H0 = float(self.heterozygosity.mean())  # Baseline
+        
+        # Disease state per site (0 = disease-free, >0 = prevalence)
+        self.disease_prevalence = np.zeros(self.config.n_sites)
     
     def run(self) -> NetworkResult:
         """Run full simulation."""
@@ -336,8 +427,12 @@ class NetworkSimulation:
                     result.states.append(NetworkState(
                         year=y,
                         populations=np.zeros(self.config.n_sites),
+                        resistance_freqs=np.zeros(self.config.n_sites),
+                        heterozygosity=np.zeros(self.config.n_sites),
+                        disease_prevalence=np.zeros(self.config.n_sites),
                         N0_per_site=self.config.n_per_site,
-                        N0_total=self.config.total_initial_population
+                        N0_total=self.config.total_initial_population,
+                        H0=self.H0
                     ))
                 break
         
@@ -346,33 +441,39 @@ class NetworkSimulation:
     def _simulate_year(self, year: int) -> NetworkState:
         """Simulate one year of network dynamics."""
         
-        # 1. Natural mortality
+        # 1. Natural mortality (HIGH survival when healthy)
         self.adults *= self.config.survival_adult
         self.juveniles *= self.config.survival_juvenile
         
-        # 2. Disease mortality (after onset)
-        if year >= self.config.disease_onset:
-            prevalence = self._disease_prevalence(year)
-            disease_survival = 1 - (prevalence * self.config.disease_mortality)
-            self.adults *= disease_survival
-            self.juveniles *= disease_survival
+        # 2. Disease dynamics - SPREADS THROUGH NETWORK
+        if year >= self.config.disease_onset_year:
+            self._update_disease_spread(year)
+            self._apply_disease_mortality()
         
-        # 3. Maturation (juveniles become adults)
-        # Simplified: fraction of juveniles mature each year
+        # 3. Selection on resistance (survivors have higher resistance)
+        self._apply_selection()
+        
+        # 4. Maturation (juveniles become adults)
         maturing = self.juveniles / self.config.maturation_years
         self.adults += maturing
         self.juveniles -= maturing
         
-        # 4. Reproduction with Allee effect
-        larvae = self._produce_larvae()
+        # 5. Reproduction with Allee effect and sweepstakes (RATIO-BASED)
+        recruits = self._reproduce()
         
-        # 5. Larval dispersal via connectivity matrix
-        settlers = self._disperse_larvae(larvae)
+        # 6. Larval dispersal via connectivity matrix (carries genes!)
+        settlers, settler_genes = self._disperse_larvae(recruits)
         
-        # 6. Add new recruits as juveniles
+        # 7. Add new recruits as juveniles
         self.juveniles += settlers
         
-        # 7. Outplanting
+        # 8. Update genetics from settlers
+        self._update_genetics_from_settlers(settlers, settler_genes)
+        
+        # 9. Genetic drift (random changes in small populations)
+        self._apply_genetic_drift()
+        
+        # 10. Outplanting
         if (year >= self.config.outplanting_start and 
             self.config.outplanting_per_site > 0):
             for site in self.config.outplanting_sites:
@@ -393,58 +494,180 @@ class NetworkSimulation:
             self.adults = self.populations * adult_ratio
             self.juveniles = self.populations * (1 - adult_ratio)
         
+        # Update heterozygosity
+        self.heterozygosity = 2 * self.resistance_freqs * (1 - self.resistance_freqs)
+        
         return NetworkState(
             year=year,
             populations=self.populations.copy(),
+            resistance_freqs=self.resistance_freqs.copy(),
+            heterozygosity=self.heterozygosity.copy(),
+            disease_prevalence=self.disease_prevalence.copy(),
             N0_per_site=self.config.n_per_site,
-            N0_total=self.config.total_initial_population
+            N0_total=self.config.total_initial_population,
+            H0=self.H0
         )
     
-    def _disease_prevalence(self, year: int) -> float:
-        """Calculate disease prevalence at given year."""
-        if year < self.config.disease_onset:
-            return 0.0
-        years_since = year - self.config.disease_onset
-        return (self.config.disease_endemic_prevalence + 
-                (self.config.disease_peak_prevalence - self.config.disease_endemic_prevalence) * 
-                np.exp(-self.config.disease_decay * years_since))
+    def _update_disease_spread(self, year: int):
+        """
+        Disease spreads through network from initial site.
+        Uses connectivity matrix - disease follows larvae/currents.
+        """
+        # Initialize disease at onset
+        if year == self.config.disease_onset_year:
+            # Onset site, clipped to valid range
+            onset_site = min(self.config.disease_onset_site, self.config.n_sites - 1)
+            self.disease_prevalence[onset_site] = 0.9  # Initial outbreak
+        
+        # Spread to connected sites
+        new_prevalence = self.disease_prevalence.copy()
+        
+        for i in range(self.config.n_sites):
+            if self.disease_prevalence[i] < 0.01:
+                # Site is disease-free, check if neighbors are infected
+                # Probability of infection from connected sites
+                infection_pressure = 0.0
+                for j in range(self.config.n_sites):
+                    if self.disease_prevalence[j] > 0.01:
+                        # Infection spreads via connectivity
+                        infection_pressure += (self.C[j, i] * 
+                                              self.disease_prevalence[j] * 
+                                              self.config.disease_spread_rate)
+                
+                # Stochastic infection
+                if self.rng.random() < infection_pressure:
+                    new_prevalence[i] = 0.5  # New outbreak starts at 50%
+            else:
+                # Site is infected - prevalence dynamics
+                # Can increase (more transmission) or decrease (recovery/death)
+                # Tends toward equilibrium based on resistance
+                mean_resistance = self.resistance_freqs[i]
+                equilibrium = 0.3 * (1 - mean_resistance)  # Lower if resistant
+                
+                # Move toward equilibrium
+                new_prevalence[i] += 0.2 * (equilibrium - self.disease_prevalence[i])
+                new_prevalence[i] += self.rng.normal(0, 0.05)
+                new_prevalence[i] = np.clip(new_prevalence[i], 0, 0.95)
+        
+        self.disease_prevalence = new_prevalence
     
-    def _produce_larvae(self) -> np.ndarray:
-        """Produce larvae at each site with Allee effect."""
-        larvae = np.zeros(self.config.n_sites)
+    def _apply_disease_mortality(self):
+        """Apply disease mortality - modulated by resistance."""
+        for i in range(self.config.n_sites):
+            if self.disease_prevalence[i] > 0.01:
+                # Mortality depends on prevalence and resistance
+                resistance = self.resistance_freqs[i]
+                # Resistant individuals have lower mortality
+                effective_mortality = (self.config.disease_mortality * 
+                                      self.disease_prevalence[i] * 
+                                      (1 - resistance * self.config.resistance_effect))
+                
+                survival = 1 - effective_mortality
+                self.adults[i] *= survival
+                self.juveniles[i] *= survival
+    
+    def _apply_selection(self):
+        """
+        Selection increases resistance allele frequency.
+        Survivors of disease are more resistant on average.
+        """
+        for i in range(self.config.n_sites):
+            if self.disease_prevalence[i] > 0.1:
+                # Strong selection when disease is present
+                # Increase resistance frequency (simplified)
+                selection_strength = self.disease_prevalence[i] * 0.02
+                self.resistance_freqs[i] += selection_strength
+                self.resistance_freqs[i] = min(self.resistance_freqs[i], 0.99)
+    
+    def _reproduce(self) -> np.ndarray:
+        """
+        Reproduction with Allee effect and sweepstakes.
+        
+        Returns recruits as RATIO of adult population.
+        We don't know absolute offspring numbers - just ratios.
+        """
+        recruits = np.zeros(self.config.n_sites)
         
         for i in range(self.config.n_sites):
             n_adults = self.adults[i]
             
             if n_adults < self.config.allee_threshold:
                 # Below threshold: near-zero reproduction
-                fertilization = 0.01
+                fertilization_ratio = 0.01
             else:
                 # Saturating fertilization
                 h = self.config.allee_half_sat
-                fertilization = n_adults**2 / (n_adults**2 + h**2)
+                fertilization_ratio = n_adults**2 / (n_adults**2 + h**2)
             
-            # Larvae produced
-            larvae[i] = (n_adults * self.config.fecundity * 
-                        self.config.larval_survival * fertilization)
+            # Sweepstakes: only a fraction of adults breed successfully
+            breeding_success = self.rng.beta(2, 20)  # Mean ~0.09, high variance
+            
+            # Recruits as ratio of adults × fertilization × sweepstakes
+            recruits[i] = (n_adults * 
+                          self.config.recruitment_ratio * 
+                          fertilization_ratio * 
+                          breeding_success / self.config.breeding_success_ratio)
         
-        return larvae
+        return recruits
     
-    def _disperse_larvae(self, larvae: np.ndarray) -> np.ndarray:
-        """Disperse larvae according to connectivity matrix."""
-        # settlers[j] = sum over i of larvae[i] * C[i,j]
-        settlers = self.C.T @ larvae
+    def _disperse_larvae(self, recruits: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Disperse larvae according to connectivity matrix.
+        Also tracks gene flow - larvae carry parental alleles.
         
-        # Add some stochasticity
+        Returns (settlers, settler_resistance_freqs)
+        """
+        # Settlers at each site
+        settlers = self.C.T @ recruits
+        
+        # Gene flow: weighted average of source resistance frequencies
+        # settler_genes[j] = sum_i (recruits[i] * C[i,j] * resistance[i]) / settlers[j]
+        gene_flow = self.C.T @ (recruits * self.resistance_freqs)
+        settler_genes = np.zeros(self.config.n_sites)
+        for j in range(self.config.n_sites):
+            if settlers[j] > 0:
+                settler_genes[j] = gene_flow[j] / settlers[j]
+            else:
+                settler_genes[j] = self.resistance_freqs[j]  # No change
+        
+        # Add stochasticity
         settlers *= self.rng.uniform(0.8, 1.2, self.config.n_sites)
         
-        # Density-dependent settlement (fewer survive at high density)
+        # Density-dependent settlement
         K = self.config.carrying_capacity_per_site
         density_effect = 1 - (self.populations / K)
         density_effect = np.clip(density_effect, 0.1, 1.0)
         settlers *= density_effect
         
-        return np.maximum(settlers, 0)
+        return np.maximum(settlers, 0), settler_genes
+    
+    def _update_genetics_from_settlers(self, settlers: np.ndarray, settler_genes: np.ndarray):
+        """Update site genetics based on incoming settlers (gene flow)."""
+        for i in range(self.config.n_sites):
+            if settlers[i] > 0 and self.populations[i] > 0:
+                # Weight by relative population sizes
+                old_weight = self.populations[i]
+                new_weight = settlers[i]
+                total = old_weight + new_weight
+                
+                # Weighted average of old and new allele frequencies
+                self.resistance_freqs[i] = ((old_weight * self.resistance_freqs[i] + 
+                                            new_weight * settler_genes[i]) / total)
+    
+    def _apply_genetic_drift(self):
+        """
+        Random changes in allele frequency due to finite population.
+        Larger effect in small populations.
+        """
+        for i in range(self.config.n_sites):
+            n = self.populations[i]
+            if n > 0:
+                # Drift variance inversely proportional to population size
+                # Simplified: use normal approximation
+                p = self.resistance_freqs[i]
+                drift_var = p * (1 - p) / (2 * max(n, 10))
+                drift = self.rng.normal(0, np.sqrt(drift_var))
+                self.resistance_freqs[i] = np.clip(p + drift, 0.01, 0.99)
 
 
 def run_scenario(

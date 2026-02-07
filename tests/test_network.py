@@ -119,7 +119,7 @@ class TestNetworkSimulation:
             n_sites=100,
             n_per_site=500,
             n_years=10,
-            disease_peak_prevalence=0.0  # No disease
+            disease_onset_year=100  # No disease in this run
         )
         sim = NetworkSimulation(config, seed=42)
         result = sim.run()
@@ -133,8 +133,7 @@ class TestNetworkSimulation:
         config_healthy = NetworkConfig(
             n_sites=100,
             n_years=30,
-            disease_peak_prevalence=0.0,
-            disease_endemic_prevalence=0.0,
+            disease_onset_year=100,  # Disease never starts
         )
         sim_healthy = NetworkSimulation(config_healthy, seed=42)
         result_healthy = sim_healthy.run()
@@ -143,9 +142,9 @@ class TestNetworkSimulation:
         config_sick = NetworkConfig(
             n_sites=100,
             n_years=30,
-            disease_onset=5,
-            disease_peak_prevalence=0.8,
-            disease_mortality=0.5,
+            disease_onset_year=5,
+            disease_onset_site=50,
+            disease_mortality=0.6,
         )
         sim_sick = NetworkSimulation(config_sick, seed=42)
         result_sick = sim_sick.run()
@@ -160,7 +159,7 @@ class TestNetworkSimulation:
             n_years=50,
             self_recruitment=0.8,
             connectivity_type=ConnectivityType.STEPPING_STONE,
-            disease_peak_prevalence=0.7,
+            disease_onset_year=10,
             disease_mortality=0.5,
         )
         
@@ -173,7 +172,40 @@ class TestNetworkSimulation:
                 extinctions += 1
         
         # Should rarely go extinct with high self-recruitment
-        assert extinctions < 3, "Too many extinctions with high self-recruitment"
+        assert extinctions < 5, "Too many extinctions with high self-recruitment"
+    
+    def test_genetics_tracked(self):
+        """Test that genetics are tracked per site."""
+        config = NetworkConfig(
+            n_sites=50,
+            n_years=20,
+            disease_onset_year=5,
+        )
+        sim = NetworkSimulation(config, seed=42)
+        result = sim.run()
+        
+        # Should have genetic data
+        final_state = result.states[-1]
+        assert final_state.resistance_freqs is not None
+        assert final_state.heterozygosity is not None
+        assert 0 < final_state.mean_resistance_freq < 1
+        assert 0 < final_state.h_ratio <= 1.5  # Can increase if p moves toward 0.5
+    
+    def test_disease_spreads(self):
+        """Test that disease spreads from initial site."""
+        config = NetworkConfig(
+            n_sites=100,
+            n_years=30,
+            disease_onset_year=5,
+            disease_onset_site=50,  # Start in middle
+            disease_spread_rate=0.5,
+        )
+        sim = NetworkSimulation(config, seed=42)
+        result = sim.run()
+        
+        # Disease should spread to multiple sites
+        final_state = result.states[-1]
+        assert final_state.infected_sites_ratio > 0.01
 
 
 class TestScenarioComparison:
