@@ -868,7 +868,7 @@ def _run_moss_landing_outplanting(config, seed, broodstock_resistance):
     """
     Run simulation with outplanting at year 17 (2027) in Central California.
     
-    Adds 1000 individuals per site (500 adults + 500 juveniles) in c_california
+    Adds 1000 one-year-old juveniles per site in c_california (2 years to maturity)
     with resistance allele frequencies set to broodstock_resistance at each locus.
     Uses weighted blending with existing population.
     """
@@ -899,8 +899,7 @@ def _run_moss_landing_outplanting(config, seed, broodstock_resistance):
                             weight_old * sim.resistance_freqs[i, locus]
                             + weight_new * broodstock_resistance
                         )
-                sim.adults[i] += 500      # 500 adults
-                sim.juveniles[i] += 500   # 500 juveniles
+                sim.juveniles[i] += 1000  # 1000 one-year-olds (2 yrs to maturity)
                 sim.populations[i] = sim.adults[i] + sim.juveniles[i]
 
         state = sim._simulate_year(year)
