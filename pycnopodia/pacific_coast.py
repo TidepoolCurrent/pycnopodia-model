@@ -241,10 +241,10 @@ class PacificCoastConfig:
     
     # Fjord subnetwork parameters
     # Fjord regions contain isolated pockets that block disease but allow larval export
-    fjord_pocket_fraction: float = 0.05  # Small fraction of fjord sites in isolated pockets
-    fjord_pocket_size: int = 2  # Sites per pocket (individual fjord arms)
+    fjord_pocket_fraction: float = 0.15  # Fraction of fjord sites in isolated pockets
+    fjord_pocket_size: int = 4  # Sites per pocket (individual fjord arms)
     fjord_disease_cross_pocket: float = 0.01  # Near-zero disease transmission between pockets
-    fjord_larval_self_recruitment: float = 0.95  # Very high retention within pocket
+    fjord_larval_self_recruitment: float = 0.85  # High retention in pocket fjords — larvae retained by local currents
     
     # Genetics
     n_loci: int = 10
@@ -259,8 +259,8 @@ class PacificCoastConfig:
     carrying_capacity_multiplier: float = 2.0  # K relative to initial pop (allows recovery headroom)
     recruitment_ratio: float = 0.35  # Must offset 5% adult mortality + juvenile loss
     breeding_success_ratio: float = 0.08
-    allee_threshold: int = 50
-    allee_half_sat: int = 100
+    allee_threshold: int = 10  # Low threshold: recolonizers aggregate locally
+    allee_half_sat: int = 30   # Broadcast spawners can succeed at low density if aggregated
     
     # Simulation
     n_years: int = 100
@@ -486,15 +486,17 @@ def build_larval_connectivity_matrix(
                     C[i, j] = 0.15  # Open coast - most larvae disperse
                 continue
             
-            # Same subnetwork pocket: high internal connectivity
+            # Same subnetwork pocket: internal connectivity
             if source.subnetwork_id >= 0 and source.subnetwork_id == target.subnetwork_id:
-                C[i, j] = (1 - config.fjord_larval_self_recruitment) * 0.8  # Most non-self goes to pocket neighbor
+                C[i, j] = 0.03  # Small fraction to pocket neighbor
                 continue
             
-            # From pocket to coast: small export (this enables recovery!)
+            # From pocket to coast: larval export (recovery mechanism)
+            # Use small per-site values so total coast export stays controlled
+            # After normalization, pocket self ~85%, pocket neighbors ~3%, coast export ~12%
             if source.subnetwork_id >= 0 and target.subnetwork_id < 0:
-                weight = np.exp(-dist / (config.larval_dispersal_scale * 0.3))
-                C[i, j] = weight * 0.05  # Small but nonzero larval export
+                weight = np.exp(-dist / config.larval_dispersal_scale)
+                C[i, j] = weight * 0.004  # Small per-site, sums to ~12% across all coast sites
                 continue
             
             # Same region - high connectivity
@@ -955,6 +957,12 @@ class PacificCoastSimulation:
                     continue
                 
                 if self.disease_prevalence[i] < 0.1:
+                    # Low-density sites can't support new infections
+                    density_ratio_check = self.populations[i] / max(self.initial_populations[i], 1)
+                    if density_ratio_check < 0.10:
+                        new_prevalence[i] = 0.0
+                        continue
+                    
                     # Compute transmission pressure from infected sites
                     transmission_pressure = 0.0
                     for j in range(self.n_sites):
