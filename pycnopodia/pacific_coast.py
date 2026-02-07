@@ -187,6 +187,7 @@ class Site:
     temperature: float
     initial_population: float
     is_refugia: bool = False
+    subnetwork_id: int = -1  # -1 = connected coast, 0+ = isolated fjord pocket
 
 
 @dataclass
@@ -238,6 +239,13 @@ class PacificCoastConfig:
     inland_sea_isolation: float = 0.85  # 85% of larvae stay within inland sea
     fjord_isolation: float = 0.95  # 95% stay within fjords (high isolation)
     
+    # Fjord subnetwork parameters
+    # Fjord regions contain isolated pockets that block disease but allow larval export
+    fjord_pocket_fraction: float = 0.05  # Small fraction of fjord sites in isolated pockets
+    fjord_pocket_size: int = 2  # Sites per pocket (individual fjord arms)
+    fjord_disease_cross_pocket: float = 0.01  # Near-zero disease transmission between pockets
+    fjord_larval_self_recruitment: float = 0.85  # High retention within pocket
+    
     # Genetics
     n_loci: int = 10
     initial_resistance_freq: float = 0.02
@@ -248,7 +256,7 @@ class PacificCoastConfig:
     survival_adult: float = 0.95
     survival_juvenile: float = 0.60
     maturation_years: int = 3
-    carrying_capacity_multiplier: float = 1.2  # K relative to initial pop (near equilibrium pre-SSWD)
+    carrying_capacity_multiplier: float = 2.0  # K relative to initial pop (allows recovery headroom)
     recruitment_ratio: float = 0.35  # Must offset 5% adult mortality + juvenile loss
     breeding_success_ratio: float = 0.08
     allee_threshold: int = 50
@@ -294,20 +302,15 @@ def build_sites(config: PacificCoastConfig, rng: np.random.Generator = None) -> 
             # Initial population based on historical density with variation
             pop = region.historical_density * rng.uniform(0.7, 1.3)
             
-            # Refugia probability depends on region type
-            # Fjords: some deep-water refugia but disease eventually penetrates
-            # Reduced from 0.70 to match observed declines in SE Alaska
+            # Refugia assignment
+            # Fjord regions: refugia assigned via subnetwork pockets (below)
+            # Other regions: small random probability of deep-water refugia
             if region.region_type == RegionType.FJORD:
-                refugia_prob = 0.04  # Very few deep fjord pockets (1-2 per region)
-            elif region.short_name == "SE AK N":
-                refugia_prob = 0.03  # Rare deep fjord pockets
-            elif region.short_name == "SE AK S":
-                refugia_prob = 0.10  # Some deep-water refugia (reduced from 0.15)
+                is_refugia = False  # Will be set by subnetwork assignment
             elif region.region_type == RegionType.INLAND_SEA:
-                refugia_prob = 0.05  # Rare in inland seas
+                is_refugia = rng.random() < 0.03  # Rare in inland seas
             else:
-                refugia_prob = 0.02  # Very rare on outer coast
-            is_refugia = rng.random() < refugia_prob
+                is_refugia = rng.random() < 0.01  # Very rare on outer coast
             
             sites.append(Site(
                 idx=site_idx,
@@ -316,10 +319,55 @@ def build_sites(config: PacificCoastConfig, rng: np.random.Generator = None) -> 
                 temperature=temp,
                 initial_population=pop,
                 is_refugia=is_refugia,
+                subnetwork_id=-1,  # Will be assigned below for fjords
             ))
             site_idx += 1
     
+    # Assign fjord subnetwork IDs
+    # Fjord regions get isolated pockets: small clusters that block disease
+    _assign_fjord_subnetworks(sites, config, rng)
+    
     return sites
+
+
+def _assign_fjord_subnetworks(sites: List[Site], config: PacificCoastConfig, 
+                               rng: np.random.Generator):
+    """
+    Assign subnetwork IDs to fjord region sites.
+    
+    Creates isolated pockets within fjord regions. Each pocket is a small
+    cluster of adjacent sites that blocks disease transmission but allows
+    larval export. This models real fjord geography where bacterial SSWD
+    can't easily cross fjord barriers (2-week transmission cycle) but
+    planktonic larvae disperse more freely.
+    """
+    pocket_id = 0
+    for region_id in config.region_order:
+        region = config.regions[region_id]
+        if region.region_type != RegionType.FJORD:
+            continue
+        
+        region_sites = [s for s in sites if s.region_id == region_id]
+        n_region = len(region_sites)
+        n_pocket_sites = max(1, int(n_region * config.fjord_pocket_fraction))
+        pocket_size = config.fjord_pocket_size
+        n_pockets = max(1, n_pocket_sites // pocket_size)
+        
+        # Distribute pockets evenly through region (different fjord arms)
+        pocket_starts = []
+        spacing = n_region // (n_pockets + 1)
+        for p in range(n_pockets):
+            start_idx = (p + 1) * spacing - pocket_size // 2
+            start_idx = max(0, min(start_idx, n_region - pocket_size))
+            pocket_starts.append(start_idx)
+        
+        for p, start in enumerate(pocket_starts):
+            for j in range(pocket_size):
+                if start + j < n_region:
+                    site = region_sites[start + j]
+                    site.subnetwork_id = pocket_id
+                    site.is_refugia = True  # Pocket sites are disease-protected
+            pocket_id += 1
 
 
 def get_site_region_mapping(sites: List[Site]) -> Dict[str, List[int]]:
@@ -531,6 +579,14 @@ def build_disease_connectivity_matrix(
             
             # Same region - higher transmission
             if source.region_id == target.region_id:
+                # Subnetwork isolation: disease can't cross fjord pocket boundaries
+                if (source.subnetwork_id >= 0 or target.subnetwork_id >= 0):
+                    # At least one site is in a fjord pocket
+                    if source.subnetwork_id != target.subnetwork_id:
+                        # Cross-pocket or pocket↔coast: nearly blocked
+                        D[i, j] = base_weight * config.fjord_disease_cross_pocket * temp_mod
+                        continue
+                    # Same pocket: normal within-region connectivity
                 D[i, j] = base_weight * 0.8 * temp_mod
                 continue
             
@@ -762,6 +818,7 @@ class PacificCoastSimulation:
     
     def _simulate_year(self, year: int) -> PacificCoastState:
         """Simulate one year of dynamics."""
+        self._current_year = year
         
         # 1. Natural mortality
         self.adults *= self.config.survival_adult
@@ -853,13 +910,22 @@ class PacificCoastSimulation:
         new_prevalence = self.disease_prevalence.copy()
         
         if years_since_onset == 0:
-            # Disease originates in Southern CA (warmest, southernmost)
-            origin_region = self.config.disease_origin_region
-            start, end = self.region_boundaries[origin_region]
-            
-            for i in range(start, end):
-                if i not in self.refugia_sites:
-                    new_prevalence[i] = 0.90 + self.rng.uniform(0, 0.08)
+            # SSWD appeared nearly simultaneously along entire coast (2013-2014)
+            # Likely triggered by marine heatwave (The Blob) activating latent pathogen
+            # Southern regions hit hardest initially; northern regions 1 year later
+            for region_id, (start, end) in self.region_boundaries.items():
+                region_cfg = self.config.regions[region_id]
+                # Warmer regions get hit immediately; cold regions delayed
+                if region_cfg.base_temperature >= 10.0:
+                    # Warm regions: immediate outbreak
+                    for i in range(start, end):
+                        if i not in self.refugia_sites:
+                            new_prevalence[i] = 0.85 + self.rng.uniform(0, 0.10)
+                elif region_cfg.base_temperature >= 8.0:
+                    # Mid-temp regions: partial initial outbreak
+                    for i in range(start, end):
+                        if i not in self.refugia_sites and self.rng.random() < 0.5:
+                            new_prevalence[i] = 0.70 + self.rng.uniform(0, 0.15)
         else:
             # Spread through disease connectivity matrix
             # Refugia sites: protected during acute phase, then gradually penetrable
@@ -869,20 +935,11 @@ class PacificCoastSimulation:
             for i in range(self.n_sites):
                 # Refugia protection: strong during acute phase, weakens over time
                 if i in self.refugia_sites:
-                    if is_acute:
-                        # During acute phase: fjord geography blocks bacterial spread
-                        # ~2 week transmission cycle can't cross fjord barriers
-                        continue
-                    else:
-                        # Post-acute: low-level disease trickles in
-                        # But refugia get REDUCED prevalence (not full outbreak)
-                        years_post_acute = years_since_onset - acute_phase_years
-                        penetration_factor = min(0.30, years_post_acute * 0.05)
-                        if self.rng.random() > penetration_factor:
-                            continue
-                        # Refugia get low prevalence (endemic trickle, not outbreak)
-                        new_prevalence[i] = 0.10 + self.rng.uniform(0, 0.10)
-                        continue  # Skip the full infection logic below
+                    # Fjord pocket sites: bacteria can't cross fjord barriers
+                    # 2-week transmission cycle physically blocked by geography
+                    # These sites stay disease-free throughout
+                    new_prevalence[i] = 0.0
+                    continue
                 
                 if self.disease_prevalence[i] < 0.1:
                     # Compute transmission pressure from infected sites
@@ -923,10 +980,20 @@ class PacificCoastSimulation:
                     if self.rng.random() < infection_prob:
                         new_prevalence[i] = 0.80 + self.rng.uniform(0, 0.15)
                 else:
-                    # Density-dependent disease dynamics
+                    # Disease dynamics differ between acute and post-acute phases
+                    current = self.disease_prevalence[i]
+                    
+                    if is_acute:
+                        # ACUTE PHASE: Novel pandemic - density-INDEPENDENT
+                        # Pathogen is ubiquitous in environment, high prevalence
+                        # maintained regardless of host density (like initial COVID wave)
+                        # Prevalence stays high with slow decay
+                        new_prevalence[i] = max(current * 0.95, 0.70)  # Stays >70%
+                        continue
+                    
+                    # POST-ACUTE: Density-dependent disease dynamics
                     # Disease prevalence sustained by host density + transmission
                     # When hosts crash, disease naturally declines (fewer contacts)
-                    current = self.disease_prevalence[i]
                     
                     # Host density relative to carrying capacity
                     density_ratio = self.populations[i] / max(self.initial_populations[i], 1)
@@ -946,18 +1013,19 @@ class PacificCoastSimulation:
                         self.temperatures[i], self.config
                     )
                     
-                    # Equilibrium prevalence emerges from:
-                    # - local host density (more hosts = more transmission)
-                    # - neighbor transmission pressure
-                    # - temperature
-                    # R0 analog: disease sustains when density * temp > threshold
+                    # Below critical density: disease can't sustain (too few hosts)
+                    if density_ratio < 0.02:
+                        new_prevalence[i] = max(0, current * 0.3)  # Rapid die-off
+                        continue
+                    
+                    # Equilibrium prevalence emerges from density + neighbors + temp
                     sustained_prevalence = (
-                        density_ratio * temp_mod * 0.4 +  # local density-dependent
-                        neighbor_pressure * 0.3            # neighbor reverberation
+                        density_ratio * temp_mod * 0.4 +
+                        neighbor_pressure * 0.3
                     )
                     sustained_prevalence = min(sustained_prevalence, 0.90)
                     
-                    # Decay toward density-driven equilibrium
+                    # Fast decay toward density-driven equilibrium post-acute
                     decay_rate = 0.5
                     target = sustained_prevalence + (current - sustained_prevalence) * (1 - decay_rate)
                     new_prevalence[i] = np.clip(
@@ -968,8 +1036,18 @@ class PacificCoastSimulation:
         self.disease_prevalence = new_prevalence
     
     def _apply_disease_mortality(self):
-        """Apply temperature-dependent disease mortality."""
+        """Apply temperature-dependent disease mortality.
+        
+        During acute phase: heightened mortality (novel pathogen, no immunity).
+        Post-acute: reduced to endemic levels.
+        """
         site_resistance = self._compute_site_resistance()
+        current_year = len([s for s in [] ]) # placeholder
+        
+        # Determine if in acute phase
+        years_since_onset = getattr(self, '_current_year', 0) - self.config.disease_onset_year
+        is_acute = 0 <= years_since_onset <= self.config.disease_acute_years
+        acute_multiplier = 1.3 if is_acute else 1.0  # 30% higher mortality during acute
         
         for i in range(self.n_sites):
             if self.disease_prevalence[i] > 0.01:
@@ -978,12 +1056,13 @@ class PacificCoastSimulation:
                     self.temperatures[i], self.config
                 )
                 
-                # Effective mortality = base * temp_mod * prevalence * (1 - resistance)
+                # Effective mortality = base * temp_mod * prevalence * (1 - resistance) * acute
                 effective_mortality = (
                     self.config.disease_base_mortality *
                     temp_mod *
                     self.disease_prevalence[i] *
-                    (1 - site_resistance[i])
+                    (1 - site_resistance[i]) *
+                    acute_multiplier
                 )
                 
                 survival = 1 - effective_mortality
