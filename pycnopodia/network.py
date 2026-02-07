@@ -28,8 +28,10 @@ class NetworkConfig:
     """Configuration for network model."""
     
     # Network structure
+    # Real population: ~6 billion individuals (human input)
+    # Using scaled representation for computational tractability
     n_sites: int = 1000
-    n_per_site: int = 1000  # Initial individuals per site
+    n_per_site: int = 10000  # 10M total (scaled from 6B, ratio-based outputs still valid)
     
     # Connectivity parameters
     connectivity_type: ConnectivityType = ConnectivityType.STEPPING_STONE
@@ -58,19 +60,21 @@ class NetworkConfig:
     allee_half_sat: int = 100  # Half-saturation for fertilization
     
     # Disease - SPREADS THROUGH NETWORK (CALIBRATED TO SSWD)
-    # Real SSWD: 90-100% mortality, spread ~3000km in 2 years (Harvell 2019)
+    # Real SSWD: ~99% mortality, spread ~3000km in 2 years (Harvell 2019)
+    # Human input: "mortality closer to 99%, maybe higher"
     disease_onset_site: int = 500  # Initial outbreak site (middle of network)
     disease_onset_year: int = 10
-    disease_spread_rate: float = 0.85  # Rapid wave spread (not gradual seeding)
-    disease_mortality: float = 0.95  # 95% mortality - matches observed 90-100%
+    disease_spread_rate: float = 0.90  # Rapid wave spread (near-simultaneous)
+    disease_mortality: float = 0.99  # 99% mortality - matches expert input
     disease_recovery_rate: float = 0.01  # Disease persists - minimal recovery
-    disease_endemic_prevalence: float = 0.30  # Long-term endemic level
+    disease_endemic_prevalence: float = 0.25  # Long-term endemic level
     
     # Genetics - TRACK ALLELES PER SITE
-    # Resistance was RARE before outbreak (if common, we'd see >10% survival)
+    # Resistance was EXTREMELY RARE before outbreak
+    # Human input: "resistance is even lower"
     n_loci: int = 10  # Resistance loci to track
-    initial_resistance_freq: float = 0.02  # Very rare before outbreak
-    resistance_effect: float = 0.35  # Reduces mortality from 95% to ~62% for RR
+    initial_resistance_freq: float = 0.005  # 0.5% - extremely rare
+    resistance_effect: float = 0.40  # Reduces mortality from 99% to ~59% for RR
     
     # Intervention - OUTPLANTING
     outplanting_n: int = 100  # Number of stars per outplanting event
@@ -229,7 +233,7 @@ class NetworkState:
     # Baselines for ratio calculations
     N0_per_site: int = 1000
     N0_total: int = 1_000_000
-    H0: float = 0.0392  # Initial He (at p=0.02: 2*0.02*0.98 = 0.0392)
+    H0: float = 0.01  # Initial He (at p=0.005: 2*0.005*0.995 ≈ 0.01)
     
     @property
     def total_population(self) -> int:
@@ -527,45 +531,41 @@ class NetworkSimulation:
     
     def _update_disease_spread(self, year: int):
         """
-        Disease spreads as WAVE through network from initial site.
+        Disease spreads RAPIDLY through network.
         
-        Real SSWD spread rapidly along the coast - not gradual seeding.
-        Models epidemic wave propagation.
+        Real SSWD: hit entire 3000km coast in ~2 years.
+        Model: X% of uninfected sites get infected each year.
         """
-        # Initialize disease at onset - starts as epidemic
-        if year == self.config.disease_onset_year:
-            onset_site = min(self.config.disease_onset_site, self.config.n_sites - 1)
-            self.disease_prevalence[onset_site] = 0.95  # Full outbreak
+        years_since_onset = year - self.config.disease_onset_year
         
-        # Disease spreads as a WAVE to adjacent sites
+        if years_since_onset < 0:
+            return
+        
         new_prevalence = self.disease_prevalence.copy()
         
-        for i in range(self.config.n_sites):
-            if self.disease_prevalence[i] < 0.1:
-                # Site is disease-free
-                # Check if ANY connected site has disease
-                has_infected_neighbor = False
-                for j in range(self.config.n_sites):
-                    if self.C[j, i] > 0.01 and self.disease_prevalence[j] > 0.3:
-                        has_infected_neighbor = True
-                        break
-                
-                # Wave-like spread: high probability to catch from neighbor
-                if has_infected_neighbor:
+        if years_since_onset == 0:
+            # Year 0: disease appears at multiple sites simultaneously
+            # (Real SSWD hit multiple locations, not single origin)
+            n_initial = max(1, int(self.config.n_sites * 0.1))  # 10% of sites
+            initial_sites = self.rng.choice(self.config.n_sites, n_initial, replace=False)
+            for site in initial_sites:
+                new_prevalence[site] = 0.95
+        else:
+            # Subsequent years: rapid spread to remaining sites
+            for i in range(self.config.n_sites):
+                if self.disease_prevalence[i] < 0.1:
+                    # Uninfected site - high probability of getting infected
+                    # spread_rate = fraction of uninfected sites that get infected per year
                     if self.rng.random() < self.config.disease_spread_rate:
-                        new_prevalence[i] = 0.9  # Epidemic hits hard
-            else:
-                # Site is infected - high prevalence persists during outbreak
-                # Very slow recovery - disease persists (matches observed SSWD dynamics)
-                endemic = self.config.disease_endemic_prevalence
-                recovery = self.config.disease_recovery_rate
-                
-                # Slow decay toward endemic level
-                current = self.disease_prevalence[i]
-                target = endemic + (current - endemic) * (1 - recovery)
-                
-                new_prevalence[i] = target + self.rng.normal(0, 0.03)
-                new_prevalence[i] = np.clip(new_prevalence[i], endemic * 0.5, 0.98)
+                        new_prevalence[i] = 0.90 + self.rng.uniform(0, 0.08)
+                else:
+                    # Already infected - slow decay toward endemic
+                    endemic = self.config.disease_endemic_prevalence
+                    recovery = self.config.disease_recovery_rate
+                    current = self.disease_prevalence[i]
+                    target = endemic + (current - endemic) * (1 - recovery)
+                    new_prevalence[i] = np.clip(target + self.rng.normal(0, 0.02), 
+                                                 endemic * 0.5, 0.98)
         
         self.disease_prevalence = new_prevalence
     
