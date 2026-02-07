@@ -767,6 +767,9 @@ class PacificCoastSimulation:
         self.adults *= self.config.survival_adult
         self.juveniles *= self.config.survival_juvenile
         
+        # 1b. Apply climate warming + marine heatwave anomaly
+        self._update_temperatures(year)
+        
         # 2. Disease dynamics
         if year >= self.config.disease_onset_year:
             self._update_disease_spread(year)
@@ -825,6 +828,21 @@ class PacificCoastSimulation:
             locus_effects=self.locus_effects,
         )
     
+    def _update_temperatures(self, year: int):
+        """Apply climate warming and marine heatwave anomalies."""
+        for i, site in enumerate(self.sites):
+            region_cfg = self.config.regions[site.region_id]
+            # Gradual warming: warming_rate is °C per decade
+            warming = region_cfg.warming_rate * year / 10.0
+            # Marine heatwave ("The Blob", 2013-2016 = years 10-13 in model)
+            # +1.5-2.5°C anomaly across NE Pacific
+            blob_anomaly = 0.0
+            if 10 <= year <= 13:
+                blob_anomaly = 2.0  # Peak anomaly during the Blob
+            elif year == 14:
+                blob_anomaly = 1.0  # Lingering warmth
+            self.temperatures[i] = site.temperature + warming + blob_anomaly
+
     def _update_disease_spread(self, year: int):
         """Disease spreads from origin, temperature-modulated."""
         years_since_onset = year - self.config.disease_onset_year
