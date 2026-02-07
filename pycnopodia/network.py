@@ -68,13 +68,14 @@ class NetworkConfig:
     disease_mortality: float = 0.99  # 99% mortality - matches expert input
     disease_recovery_rate: float = 0.01  # Disease persists - minimal recovery
     disease_endemic_prevalence: float = 0.25  # Long-term endemic level
+    refugia_fraction: float = 0.05  # 5% of sites are refugia (disease-free)
     
     # Genetics - TRACK ALLELES PER SITE
-    # Resistance was EXTREMELY RARE before outbreak
-    # Human input: "resistance is even lower"
+    # Need enough initial resistance for ~5-10% survival (observed)
     n_loci: int = 10  # Resistance loci to track
-    initial_resistance_freq: float = 0.005  # 0.5% - extremely rare
-    resistance_effect: float = 0.40  # Reduces mortality from 99% to ~59% for RR
+    initial_resistance_freq: float = 0.03  # 3% - allows for some survivors
+    resistance_effect: float = 0.70  # RR mortality: 99% × 0.30 = 30%
+    max_resistance_freq: float = 0.95  # Biological ceiling - can't go above 95%
     
     # Intervention - OUTPLANTING
     outplanting_n: int = 100  # Number of stars per outplanting event
@@ -423,6 +424,10 @@ class NetworkSimulation:
         
         # Disease state per site (0 = disease-free, >0 = prevalence)
         self.disease_prevalence = np.zeros(self.config.n_sites)
+        
+        # Refugia: some sites never get infected (cooler waters, isolation, etc.)
+        n_refugia = int(self.config.n_sites * self.config.refugia_fraction)
+        self.refugia_sites = set(self.rng.choice(self.config.n_sites, n_refugia, replace=False))
     
     def run(self) -> NetworkResult:
         """Run full simulation."""
@@ -546,16 +551,21 @@ class NetworkSimulation:
         if years_since_onset == 0:
             # Year 0: disease appears at multiple sites simultaneously
             # (Real SSWD hit multiple locations, not single origin)
-            n_initial = max(1, int(self.config.n_sites * 0.1))  # 10% of sites
-            initial_sites = self.rng.choice(self.config.n_sites, n_initial, replace=False)
+            # Exclude refugia from initial outbreak
+            non_refugia = [i for i in range(self.config.n_sites) if i not in self.refugia_sites]
+            n_initial = max(1, int(len(non_refugia) * 0.1))  # 10% of non-refugia sites
+            initial_sites = self.rng.choice(non_refugia, n_initial, replace=False)
             for site in initial_sites:
                 new_prevalence[site] = 0.95
         else:
             # Subsequent years: rapid spread to remaining sites
             for i in range(self.config.n_sites):
+                # Skip refugia - they never get infected
+                if i in self.refugia_sites:
+                    continue
+                    
                 if self.disease_prevalence[i] < 0.1:
                     # Uninfected site - high probability of getting infected
-                    # spread_rate = fraction of uninfected sites that get infected per year
                     if self.rng.random() < self.config.disease_spread_rate:
                         new_prevalence[i] = 0.90 + self.rng.uniform(0, 0.08)
                 else:
@@ -588,14 +598,16 @@ class NetworkSimulation:
         """
         Selection increases resistance allele frequency.
         Survivors of disease are more resistant on average.
+        Capped at max_resistance_freq (biological ceiling).
         """
+        max_r = self.config.max_resistance_freq
         for i in range(self.config.n_sites):
             if self.disease_prevalence[i] > 0.1:
                 # Strong selection when disease is present
                 # Increase resistance frequency (simplified)
                 selection_strength = self.disease_prevalence[i] * 0.02
                 self.resistance_freqs[i] += selection_strength
-                self.resistance_freqs[i] = min(self.resistance_freqs[i], 0.99)
+                self.resistance_freqs[i] = min(self.resistance_freqs[i], max_r)
     
     def _reproduce(self) -> np.ndarray:
         """
@@ -677,6 +689,7 @@ class NetworkSimulation:
         Random changes in allele frequency due to finite population.
         Larger effect in small populations.
         """
+        max_r = self.config.max_resistance_freq
         for i in range(self.config.n_sites):
             n = self.populations[i]
             if n > 0:
@@ -685,7 +698,7 @@ class NetworkSimulation:
                 p = self.resistance_freqs[i]
                 drift_var = p * (1 - p) / (2 * max(n, 10))
                 drift = self.rng.normal(0, np.sqrt(drift_var))
-                self.resistance_freqs[i] = np.clip(p + drift, 0.01, 0.99)
+                self.resistance_freqs[i] = np.clip(p + drift, 0.01, max_r)
     
     def _apply_outplanting(self):
         """
