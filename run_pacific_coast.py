@@ -864,6 +864,230 @@ def print_summary_statistics(result: PacificCoastResult):
         print(f"  {status} {name}: {value:.1%} (target: {low:.0%}-{high:.0%})")
 
 
+def _run_moss_landing_outplanting(config, seed, broodstock_resistance):
+    """
+    Run simulation with outplanting at year 17 (2027) in Central California.
+    
+    Adds 1000 individuals per site (500 adults + 500 juveniles) in c_california
+    with resistance allele frequencies set to broodstock_resistance at each locus.
+    Uses weighted blending with existing population.
+    """
+    sim = PacificCoastSimulation(config, seed=seed)
+    boundaries = get_site_region_boundaries(sim.sites)
+    cc_start, cc_end = boundaries["c_california"]
+    outplant_year = 17  # 2027 = 2010 + 17
+    outplant_n = 1000   # per site
+
+    result = PacificCoastResult(
+        config=config,
+        sites=sim.sites,
+        states=[],
+        larval_connectivity=sim.larval_connectivity,
+        disease_connectivity=sim.disease_connectivity,
+    )
+
+    for year in range(config.n_years):
+        if year == outplant_year:
+            for i in range(cc_start, cc_end):
+                old_pop = sim.populations[i]
+                new_pop = old_pop + outplant_n
+                if new_pop > 0:
+                    weight_old = old_pop / new_pop
+                    weight_new = outplant_n / new_pop
+                    for locus in range(config.n_loci):
+                        sim.resistance_freqs[i, locus] = (
+                            weight_old * sim.resistance_freqs[i, locus]
+                            + weight_new * broodstock_resistance
+                        )
+                sim.adults[i] += 500      # 500 adults
+                sim.juveniles[i] += 500   # 500 juveniles
+                sim.populations[i] = sim.adults[i] + sim.juveniles[i]
+
+        state = sim._simulate_year(year)
+        result.states.append(state)
+
+        if sim.populations.sum() < 1:
+            from pycnopodia.pacific_coast import PacificCoastState
+            for y in range(year + 1, config.n_years):
+                result.states.append(PacificCoastState(
+                    year=y,
+                    populations=np.zeros(sim.n_sites),
+                    resistance_freqs=np.zeros((sim.n_sites, config.n_loci)),
+                    disease_prevalence=np.zeros(sim.n_sites),
+                    temperatures=sim.temperatures.copy(),
+                    initial_populations=sim.initial_populations,
+                    locus_effects=sim.locus_effects,
+                ))
+            break
+
+    return result
+
+
+def plot_moss_landing_comparison(result_2019, result_2026, baseline):
+    """
+    Plot comparison of Moss Landing outplanting scenarios.
+    
+    6-panel figure comparing baseline, 2019 broodstock, and 2026 broodstock.
+    """
+    print("\n🌟 Generating Moss Landing outplanting comparison plots...")
+    
+    years = baseline.years
+    config = baseline.config
+    
+    traj_base = baseline.get_region_trajectories()
+    traj_2019 = result_2019.get_region_trajectories()
+    traj_2026 = result_2026.get_region_trajectories()
+    
+    # Helper: mean pop ratio across all regions
+    def mean_pop(traj):
+        total = np.zeros(len(years))
+        for r in REGION_ORDER:
+            total += traj[r]["population_ratio"]
+        return total / len(REGION_ORDER)
+    
+    fig, axes = plt.subplots(2, 3, figsize=(18, 11))
+    
+    line_styles = [
+        ('Baseline (no outplanting)', 'black', '-'),
+        ('2019 broodstock (resist=0.15)', '#E67E22', '--'),
+        ('2026 broodstock (resist=0.35)', '#27AE60', '-.'),
+    ]
+    
+    # Convert model years to calendar years
+    cal_years = np.array(years) + 2010
+    
+    # --- Panel 1: C. California population over time ---
+    ax = axes[0, 0]
+    for label, color, ls, traj in zip(
+        [s[0] for s in line_styles], [s[1] for s in line_styles], [s[2] for s in line_styles],
+        [traj_base, traj_2019, traj_2026]
+    ):
+        ax.plot(cal_years, traj["c_california"]["population_ratio"], label=label, color=color, linestyle=ls, linewidth=2)
+    ax.axvline(x=2027, color='blue', linestyle=':', alpha=0.5, label='Release year (2027)')
+    ax.axvline(x=2013, color='red', linestyle=':', alpha=0.5, label='SSWD onset (2013)')
+    ax.set_xlabel("Year"); ax.set_ylabel("Population Ratio")
+    ax.set_title("Central California Population", fontsize=12, fontweight='bold')
+    ax.legend(fontsize=7, loc='upper right'); ax.grid(True, alpha=0.3); ax.set_ylim(0, None)
+    
+    # --- Panel 2: Overall Pacific Coast population ---
+    ax = axes[0, 1]
+    for label, color, ls, traj in zip(
+        [s[0] for s in line_styles], [s[1] for s in line_styles], [s[2] for s in line_styles],
+        [traj_base, traj_2019, traj_2026]
+    ):
+        ax.plot(cal_years, mean_pop(traj), label=label, color=color, linestyle=ls, linewidth=2)
+    ax.axvline(x=2027, color='blue', linestyle=':', alpha=0.5)
+    ax.set_xlabel("Year"); ax.set_ylabel("Mean Population Ratio")
+    ax.set_title("Overall Pacific Coast Population", fontsize=12, fontweight='bold')
+    ax.legend(fontsize=7); ax.grid(True, alpha=0.3); ax.set_ylim(0, None)
+    
+    # --- Panel 3: C. California resistance evolution ---
+    ax = axes[0, 2]
+    for label, color, ls, traj in zip(
+        [s[0] for s in line_styles], [s[1] for s in line_styles], [s[2] for s in line_styles],
+        [traj_base, traj_2019, traj_2026]
+    ):
+        ax.plot(cal_years, traj["c_california"]["resistance"], label=label, color=color, linestyle=ls, linewidth=2)
+    ax.axvline(x=2027, color='blue', linestyle=':', alpha=0.5)
+    ax.set_xlabel("Year"); ax.set_ylabel("Mean Resistance Frequency")
+    ax.set_title("C. California Resistance Evolution", fontsize=12, fontweight='bold')
+    ax.legend(fontsize=7); ax.grid(True, alpha=0.3); ax.set_ylim(0, 1.0)
+    
+    # --- Panel 4: Disease prevalence in C. California ---
+    ax = axes[1, 0]
+    for label, color, ls, traj in zip(
+        [s[0] for s in line_styles], [s[1] for s in line_styles], [s[2] for s in line_styles],
+        [traj_base, traj_2019, traj_2026]
+    ):
+        ax.plot(cal_years, traj["c_california"]["disease_prevalence"], label=label, color=color, linestyle=ls, linewidth=2)
+    ax.axvline(x=2027, color='blue', linestyle=':', alpha=0.5)
+    ax.set_xlabel("Year"); ax.set_ylabel("Disease Prevalence")
+    ax.set_title("C. California Disease Prevalence", fontsize=12, fontweight='bold')
+    ax.legend(fontsize=7); ax.grid(True, alpha=0.3); ax.set_ylim(0, 1.0)
+    
+    # --- Panel 5: Regional comparison bar chart at year 2060 (year 50) ---
+    ax = axes[1, 1]
+    year_idx_2060 = min(50, len(years) - 1)
+    
+    x_pos = np.arange(len(REGION_ORDER))
+    width = 0.25
+    
+    for offset, (label, color, _), traj in zip(
+        [-width, 0, width],
+        line_styles,
+        [traj_base, traj_2019, traj_2026]
+    ):
+        vals = [traj[r]["population_ratio"][year_idx_2060] for r in REGION_ORDER]
+        ax.bar(x_pos + offset, vals, width, label=label, color=color, edgecolor='black', alpha=0.8)
+    
+    region_labels = [config.regions[r].short_name for r in REGION_ORDER]
+    ax.set_xticks(x_pos); ax.set_xticklabels(region_labels, rotation=45, ha='right', fontsize=8)
+    ax.set_ylabel("Population Ratio"); ax.set_title("Regional Populations at 2060", fontsize=12, fontweight='bold')
+    ax.legend(fontsize=6); ax.grid(True, alpha=0.3, axis='y')
+    
+    # --- Panel 6: C. California zoomed 2025-2060 ---
+    ax = axes[1, 2]
+    zoom_start = max(0, 15)   # year 15 = 2025
+    zoom_end = min(50, len(years) - 1)  # year 50 = 2060
+    zoom_cal = cal_years[zoom_start:zoom_end]
+    
+    for label, color, ls, traj in zip(
+        [s[0] for s in line_styles], [s[1] for s in line_styles], [s[2] for s in line_styles],
+        [traj_base, traj_2019, traj_2026]
+    ):
+        ax.plot(zoom_cal, traj["c_california"]["population_ratio"][zoom_start:zoom_end],
+                label=label, color=color, linestyle=ls, linewidth=2)
+    ax.axvline(x=2027, color='blue', linestyle=':', alpha=0.5, label='Release year')
+    ax.set_xlabel("Year"); ax.set_ylabel("Population Ratio")
+    ax.set_title("C. California Zoomed (2025-2060)", fontsize=12, fontweight='bold')
+    ax.legend(fontsize=7); ax.grid(True, alpha=0.3); ax.set_ylim(0, None)
+    
+    plt.suptitle(
+        "Moss Landing Outplanting: 2019 vs 2026 Broodstock\n"
+        "(1000 individuals/site in Central CA, released 2027)",
+        fontsize=15, fontweight='bold', y=1.02
+    )
+    plt.tight_layout()
+    save_figure(fig, "09_moss_landing_outplanting")
+
+
+def run_moss_landing_scenarios(seed: int = 42):
+    """Run Moss Landing outplanting comparison scenarios."""
+    print("\n🌊 Running Moss Landing outplanting scenarios...")
+    
+    config = PacificCoastConfig(n_years=100)
+    
+    print("  Running baseline...")
+    sim_base = PacificCoastSimulation(config, seed=seed)
+    baseline = sim_base.run()
+    
+    print("  Running 2019 broodstock (resistance=0.15)...")
+    result_2019 = _run_moss_landing_outplanting(config, seed, broodstock_resistance=0.15)
+    
+    print("  Running 2026 broodstock (resistance=0.35)...")
+    result_2026 = _run_moss_landing_outplanting(config, seed, broodstock_resistance=0.35)
+    
+    plot_moss_landing_comparison(result_2019, result_2026, baseline)
+    
+    # Print summary
+    traj_base = baseline.get_region_trajectories()
+    traj_2019 = result_2019.get_region_trajectories()
+    traj_2026 = result_2026.get_region_trajectories()
+    
+    print("\n" + "="*60)
+    print("MOSS LANDING OUTPLANTING SUMMARY")
+    print("="*60)
+    
+    for name, traj in [("Baseline", traj_base), ("2019 Broodstock", traj_2019), ("2026 Broodstock", traj_2026)]:
+        cc_pop_2060 = traj["c_california"]["population_ratio"][min(50, len(baseline.years)-1)]
+        cc_resist_final = traj["c_california"]["resistance"][-1]
+        cc_disease_final = traj["c_california"]["disease_prevalence"][-1]
+        print(f"\n  {name}:")
+        print(f"    C. California pop ratio @ 2060: {cc_pop_2060:.3f}")
+        print(f"    C. California final resistance:  {cc_resist_final:.3f}")
+        print(f"    C. California final disease:     {cc_disease_final:.3f}")
+
+
 def export_json(result: PacificCoastResult, output_path: str = "dashboard/data.json"):
     """
     Export simulation results to JSON format for dashboard visualization.
@@ -978,6 +1202,8 @@ def main():
                        help='Export simulation data to dashboard/data.json')
     parser.add_argument('--json-only', action='store_true',
                        help='Only export JSON, skip visualization plots')
+    parser.add_argument('--moss-landing', action='store_true',
+                       help='Run Moss Landing outplanting scenarios (2019 vs 2026 broodstock)')
     args = parser.parse_args()
     
     print("="*60)
@@ -1008,6 +1234,10 @@ def main():
         plot_resistance_evolution(result)
         plot_regional_summary_dashboard(result)
         run_intervention_comparison(seed=42)
+        
+        # Moss Landing scenarios
+        if args.moss_landing:
+            run_moss_landing_scenarios(seed=42)
         
         # Print summary
         print_summary_statistics(result)
