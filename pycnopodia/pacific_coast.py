@@ -259,8 +259,8 @@ class PacificCoastConfig:
     carrying_capacity_multiplier: float = 2.0  # K relative to initial pop (allows recovery headroom)
     recruitment_ratio: float = 0.35  # Must offset 5% adult mortality + juvenile loss
     breeding_success_ratio: float = 0.08
-    allee_threshold: int = 10  # Low threshold: recolonizers aggregate locally
-    allee_half_sat: int = 30   # Broadcast spawners can succeed at low density if aggregated
+    allee_threshold: int = 50   # Broadcast spawner minimum for fertilization success
+    allee_half_sat: int = 150  # Half-saturation: ~50% fertilization at 150 adults
     
     # Simulation
     n_years: int = 100
