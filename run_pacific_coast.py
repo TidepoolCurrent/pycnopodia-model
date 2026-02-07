@@ -864,8 +864,122 @@ def print_summary_statistics(result: PacificCoastResult):
         print(f"  {status} {name}: {value:.1%} (target: {low:.0%}-{high:.0%})")
 
 
+def export_json(result: PacificCoastResult, output_path: str = "dashboard/data.json"):
+    """
+    Export simulation results to JSON format for dashboard visualization.
+    
+    Args:
+        result: PacificCoastResult from simulation
+        output_path: Where to save the JSON file
+    """
+    import json
+    from pathlib import Path
+    
+    print(f"\n💾 Exporting data to {output_path}...")
+    
+    config = result.config
+    
+    # Build sites data with coordinates (using latitude as y-coordinate)
+    # For x-coordinate, we'll use longitude proxy: alternate slightly east/west
+    sites_data = []
+    for i, site in enumerate(result.sites):
+        # Simple longitude assignment: oscillate around -125
+        lon = -125.0 + (i % 10 - 5) * 0.5
+        sites_data.append({
+            "idx": site.idx,
+            "lat": float(site.latitude),
+            "lon": float(lon),
+            "region": site.region_id,
+            "is_refugia": bool(site.is_refugia),
+            "temperature": float(site.temperature),
+        })
+    
+    # Build sparse connectivity matrix (only edges > 0.001)
+    connectivity_sparse = []
+    threshold = 0.001
+    for i in range(result.larval_connectivity.shape[0]):
+        row = []
+        for j in range(result.larval_connectivity.shape[1]):
+            val = float(result.larval_connectivity[i, j])
+            if val > threshold:
+                row.append(val)
+            else:
+                row.append(0)
+        connectivity_sparse.append(row)
+    
+    # Extract timeseries data
+    n_sites = len(result.sites)
+    n_years = len(result.states)
+    
+    populations = []
+    disease = []
+    resistance = []
+    
+    for site_idx in range(n_sites):
+        site_pops = []
+        site_disease = []
+        site_resist = []
+        
+        for state in result.states:
+            site_pops.append(float(state.populations[site_idx]))
+            site_disease.append(float(state.disease_prevalence[site_idx]))
+            # Mean resistance across loci
+            site_resist.append(float(state.resistance_freqs[site_idx].mean()))
+        
+        populations.append(site_pops)
+        disease.append(site_disease)
+        resistance.append(site_resist)
+    
+    # Build region info with colors and names
+    regions_info = {}
+    for region_id, region in config.regions.items():
+        regions_info[region_id] = {
+            "name": region.name,
+            "short_name": region.short_name,
+            "color": region.color,
+            "base_temperature": float(region.base_temperature),
+        }
+    
+    # Assemble final data structure
+    data = {
+        "sites": sites_data,
+        "connectivity": connectivity_sparse,
+        "years": [int(s.year) for s in result.states],
+        "timeseries": {
+            "populations": populations,
+            "disease": disease,
+            "resistance": resistance,
+        },
+        "regions": regions_info,
+        "config": {
+            "disease_onset_year": config.disease_onset_year,
+            "disease_origin_region": config.disease_origin_region,
+        }
+    }
+    
+    # Write to file
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_path, 'w') as f:
+        json.dump(data, f, indent=2)
+    
+    print(f"  ✓ Exported {n_sites} sites × {n_years} years")
+    print(f"  ✓ Connectivity matrix: {len(connectivity_sparse)}×{len(connectivity_sparse[0])}")
+    print(f"  ✓ File size: {output_path.stat().st_size / 1024:.1f} KB")
+
+
 def main():
     """Run Pacific Coast simulation with all visualizations."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Run Pacific Coast Pycnopodia simulation")
+    parser.add_argument('--export-json', action='store_true', 
+                       help='Export simulation data to dashboard/data.json')
+    parser.add_argument('--json-only', action='store_true',
+                       help='Only export JSON, skip visualization plots')
+    args = parser.parse_args()
+    
     print("="*60)
     print("PACIFIC COAST PYCNOPODIA SIMULATION")
     print("="*60)
@@ -878,24 +992,29 @@ def main():
     
     print(f"  Completed: {len(result.sites)} sites, {len(result.states)} years")
     
-    # Generate all visualizations
-    print("\n📊 Generating visualizations...")
+    # Export JSON if requested
+    if args.export_json or args.json_only:
+        export_json(result)
     
-    plot_geographic_structure(result)
-    plot_connectivity_matrices(result)
-    plot_disease_spread_spacetime(result)
-    plot_population_trajectories_by_region(result)
-    plot_temperature_effects(result)
-    plot_resistance_evolution(result)
-    plot_regional_summary_dashboard(result)
-    run_intervention_comparison(seed=42)
-    
-    # Print summary
-    print_summary_statistics(result)
-    
-    print("\n" + "="*60)
-    print(f"All figures saved to: {FIGURE_DIR}")
-    print("="*60)
+    # Generate visualizations unless json-only
+    if not args.json_only:
+        print("\n📊 Generating visualizations...")
+        
+        plot_geographic_structure(result)
+        plot_connectivity_matrices(result)
+        plot_disease_spread_spacetime(result)
+        plot_population_trajectories_by_region(result)
+        plot_temperature_effects(result)
+        plot_resistance_evolution(result)
+        plot_regional_summary_dashboard(result)
+        run_intervention_comparison(seed=42)
+        
+        # Print summary
+        print_summary_statistics(result)
+        
+        print("\n" + "="*60)
+        print(f"All figures saved to: {FIGURE_DIR}")
+        print("="*60)
     
     return result
 

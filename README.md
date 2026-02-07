@@ -88,6 +88,30 @@ Outplanting helps maintain genetic diversity (H/H₀) by:
 2. Introducing genetic variation from captive stock
 3. Enabling continued selection for resistance
 
+## Interactive Dashboard
+
+**NEW!** 🌊 Explore the Pacific Coast model interactively with the visualization dashboard:
+
+```bash
+# Generate data
+python3 run_pacific_coast.py --export-json
+
+# Start dashboard server
+cd dashboard
+python3 -m http.server 8090
+
+# Open http://localhost:8090 in your browser
+```
+
+**Features:**
+- **Network graph** with sites positioned by lat/lon, colored by region
+- **Time slider** to animate through 100 years (2010-2110)
+- **Live statistics** showing population, disease, and resistance by region
+- **Interactive nodes** showing population size, disease prevalence (red overlay), and resistance (green rings)
+- **Playback controls** with adjustable speed (0.5× to 4×)
+
+See [`dashboard/README.md`](dashboard/README.md) for full documentation.
+
 ## Outplanting Strategies
 
 | Strategy | Final Population | Final Resistance |
