@@ -65,8 +65,8 @@ PACIFIC_COAST_REGIONS = {
         temperature_variance=1.5,
         warming_rate=0.15,
         historical_density=0.5,
-        post_sswd_survival=0.06,  # Updated to match Hamilton 96% decline (~4% remaining)
-        n_sites=20,
+        post_sswd_survival=0.04,  # Hamilton 96% decline (~4% remaining)
+        n_sites=40,  # More sites to dilute refugia fraction
         color='#17becf',  # Cyan
     ),
     "bc_outer": RegionConfig(
@@ -91,8 +91,8 @@ PACIFIC_COAST_REGIONS = {
         temperature_variance=1.5,
         warming_rate=0.2,
         historical_density=0.5,
-        post_sswd_survival=0.18,  # Reduced from 0.50 - fjords delay but don't prevent
-        n_sites=25,
+        post_sswd_survival=0.12,  # Fjords delay disease, some refugia persist
+        n_sites=40,  # More sites to dilute refugia fraction
         color='#17becf',  # Cyan
     ),
     "salish_sea": RegionConfig(
@@ -298,9 +298,9 @@ def build_sites(config: PacificCoastConfig, rng: np.random.Generator = None) -> 
             # Fjords: some deep-water refugia but disease eventually penetrates
             # Reduced from 0.70 to match observed declines in SE Alaska
             if region.region_type == RegionType.FJORD:
-                refugia_prob = 0.08  # Only deepest fjords provide true refugia
+                refugia_prob = 0.04  # Very few deep fjord pockets (1-2 per region)
             elif region.short_name == "SE AK N":
-                refugia_prob = 0.06  # Very few true refugia even in deep fjords
+                refugia_prob = 0.03  # Rare deep fjord pockets
             elif region.short_name == "SE AK S":
                 refugia_prob = 0.10  # Some deep-water refugia (reduced from 0.15)
             elif region.region_type == RegionType.INLAND_SEA:
@@ -870,19 +870,19 @@ class PacificCoastSimulation:
                 # Refugia protection: strong during acute phase, weakens over time
                 if i in self.refugia_sites:
                     if is_acute:
-                        # During acute phase: refugia stay disease-free
+                        # During acute phase: fjord geography blocks bacterial spread
+                        # ~2 week transmission cycle can't cross fjord barriers
                         continue
                     else:
-                        # After acute phase: disease can gradually penetrate fjords
-                        # Penetration increases over time but never reaches 100%
+                        # Post-acute: low-level disease trickles in
+                        # But refugia get REDUCED prevalence (not full outbreak)
                         years_post_acute = years_since_onset - acute_phase_years
-                        # Penetration factor: 0 at year 3, reaches ~0.50 by year 8
-                        # Disease eventually finds fjord populations  
-                        penetration_factor = min(0.50, years_post_acute * 0.10)
-                        
-                        # Only process if random check passes (gradual infection)
+                        penetration_factor = min(0.30, years_post_acute * 0.05)
                         if self.rng.random() > penetration_factor:
                             continue
+                        # Refugia get low prevalence (endemic trickle, not outbreak)
+                        new_prevalence[i] = 0.10 + self.rng.uniform(0, 0.10)
+                        continue  # Skip the full infection logic below
                 
                 if self.disease_prevalence[i] < 0.1:
                     # Compute transmission pressure from infected sites
