@@ -356,10 +356,11 @@ def get_temperature_spread_modifier(temperature: float, config: PacificCoastConf
     
     Returns modifier in [0.5, 1.5] range.
     """
-    # Center around 12°C
-    temp_deviation = (temperature - 12.0) / 6.0  # Normalize
-    modifier = 1.0 + 0.5 * temp_deviation
-    return np.clip(modifier, 0.5, 1.5)
+    # Cold water dramatically slows spread
+    # Center around 12°C; below 9°C disease spreads very slowly
+    temp_deviation = (temperature - 12.0) / 4.0  # Steeper scaling
+    modifier = 1.0 + 0.6 * temp_deviation
+    return np.clip(modifier, 0.2, 1.8)  # Cold = 0.2x, warm = 1.8x
 
 
 def build_larval_connectivity_matrix(
@@ -845,8 +846,12 @@ class PacificCoastSimulation:
                     if self.rng.random() < infection_prob:
                         new_prevalence[i] = 0.80 + self.rng.uniform(0, 0.15)
                 else:
-                    # Decay toward endemic level
-                    endemic = self.config.disease_endemic_prevalence
+                    # Decay toward endemic level (temperature-dependent)
+                    # Cold water → lower endemic prevalence
+                    temp_mod = get_temperature_spread_modifier(
+                        self.temperatures[i], self.config
+                    )
+                    endemic = self.config.disease_endemic_prevalence * temp_mod
                     current = self.disease_prevalence[i]
                     target = endemic + (current - endemic) * 0.5  # Fast decay (SSWD was acute)
                     new_prevalence[i] = np.clip(
