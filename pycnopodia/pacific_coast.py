@@ -234,7 +234,7 @@ class PacificCoastConfig:
     survival_juvenile: float = 0.60
     maturation_years: int = 3
     carrying_capacity_multiplier: float = 5.0  # K relative to initial pop
-    recruitment_ratio: float = 0.10
+    recruitment_ratio: float = 0.35  # Must offset 5% adult mortality + juvenile loss
     breeding_success_ratio: float = 0.08
     allee_threshold: int = 50
     allee_half_sat: int = 100
@@ -407,9 +407,14 @@ def build_larval_connectivity_matrix(
             # Distance in site indices (proxy for geographic distance)
             dist = abs(j - i)
             
-            # Same site - some self-recruitment
+            # Same site - self-recruitment (much higher in fjords)
             if i == j:
-                C[i, j] = self_retention * 0.3
+                if source_region.region_type == RegionType.FJORD:
+                    C[i, j] = 0.92  # Fjords trap larvae — semi-enclosed, high retention
+                elif source_region.region_type == RegionType.INLAND_SEA:
+                    C[i, j] = 0.50  # Inland seas retain more than open coast
+                else:
+                    C[i, j] = 0.15  # Open coast - most larvae disperse
                 continue
             
             # Same region - high connectivity
