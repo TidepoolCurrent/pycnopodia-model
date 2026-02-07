@@ -6,7 +6,7 @@ Reproduction module implementing:
 """
 
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple
 from .config import Config
 from .population import Population
 

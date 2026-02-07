@@ -9,7 +9,7 @@ Implements:
 """
 
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple
 from dataclasses import dataclass, field
 from .config import Config
 

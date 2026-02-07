@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pycnopodia.network import NetworkSimulation, NetworkConfig, ConnectivityType
+from pycnopodia.network import NetworkSimulation, NetworkConfig
 
 OUT_DIR = Path(__file__).parent.parent / "figures"
 OUT_DIR.mkdir(exist_ok=True)

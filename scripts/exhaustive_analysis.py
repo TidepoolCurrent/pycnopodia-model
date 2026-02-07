@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from pycnopodia.network import (
     NetworkSimulation, NetworkConfig, ConnectivityType,
-    run_scenario, build_connectivity_matrix
+    build_connectivity_matrix
 )
 
 # Output directory

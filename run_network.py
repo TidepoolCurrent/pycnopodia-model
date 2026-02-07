@@ -7,7 +7,6 @@ Test different connectivity scenarios.
 """
 
 import argparse
-import numpy as np
 from pycnopodia.network import (
     NetworkConfig, NetworkSimulation, ConnectivityType,
     run_scenario, compare_scenarios

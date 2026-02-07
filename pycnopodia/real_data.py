@@ -6,9 +6,7 @@ Uses historical data to parameterize environmental stochasticity.
 """
 
 import numpy as np
-from typing import Tuple, Dict, List, Optional
-from pathlib import Path
-import json
+from typing import Tuple, Dict, List
 
 
 # Historical SST data for Pacific Northwest (simplified)

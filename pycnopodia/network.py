@@ -9,7 +9,7 @@ All outputs in RATIOS relative to baseline.
 
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Callable
+from typing import Dict, List, Tuple
 from enum import Enum
 
 

@@ -3,13 +3,13 @@ Main simulation class orchestrating all model components.
 """
 
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 from .config import Config
 from .population import Population
 from .reproduction import reproduce
 from .disease import apply_sswd, calculate_prevalence
-from .intervention import Broodstock, outplant, should_outplant
+from .intervention import Broodstock, outplant
 
 
 @dataclass

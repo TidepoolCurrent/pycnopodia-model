@@ -10,7 +10,7 @@ Pycnopodia biology is fundamentally size-dependent:
 
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, Dict
+from typing import Tuple, Dict
 from .config import Config
 
 

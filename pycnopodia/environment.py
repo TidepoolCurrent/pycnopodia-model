@@ -9,8 +9,7 @@ Implements:
 """
 
 import numpy as np
-from typing import Tuple, Optional, List
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass

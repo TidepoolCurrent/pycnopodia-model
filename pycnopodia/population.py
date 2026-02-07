@@ -6,7 +6,7 @@ Individuals are represented as structured arrays for computational efficiency.
 
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, Dict
+from typing import Dict
 from .config import Config
 
 

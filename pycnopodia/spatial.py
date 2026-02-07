@@ -8,7 +8,7 @@ Implements grid-based individual tracking for:
 """
 
 import numpy as np
-from typing import Tuple, Optional, List
+from typing import Tuple
 from dataclasses import dataclass
 
 
