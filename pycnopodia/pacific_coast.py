@@ -211,7 +211,8 @@ class PacificCoastConfig:
     # Alaska (cold) keeps ~40%, BC Fjords (refugia) ~50%, south ~0%
     disease_base_mortality: float = 0.85  # Base per-year mortality at threshold temp (acute phase)
     disease_transmission_rate: float = 0.60
-    disease_endemic_prevalence: float = 0.15
+    disease_endemic_prevalence: float = 0.03  # Low background after acute phase
+    disease_acute_years: int = 3  # Acute outbreak lasts ~3 years
     
     # Disease origin - Southern CA (warmest, southernmost)
     disease_origin_region: str = "s_california"
@@ -882,17 +883,26 @@ class PacificCoastSimulation:
                     if self.rng.random() < infection_prob:
                         new_prevalence[i] = 0.80 + self.rng.uniform(0, 0.15)
                 else:
-                    # Decay toward endemic level (temperature-dependent)
-                    # Cold water → lower endemic prevalence
+                    # Decay toward endemic level
+                    # After acute phase, disease drops rapidly
+                    years_since_onset = year - self.config.disease_onset_year
                     temp_mod = get_temperature_spread_modifier(
                         self.temperatures[i], self.config
                     )
                     endemic = self.config.disease_endemic_prevalence * temp_mod
                     current = self.disease_prevalence[i]
-                    target = endemic + (current - endemic) * 0.5  # Fast decay (SSWD was acute)
+                    
+                    if years_since_onset <= self.config.disease_acute_years:
+                        # During acute phase: slow decay (disease raging)
+                        decay_rate = 0.3
+                    else:
+                        # Post-acute: disease subsides rapidly
+                        decay_rate = 0.7
+                    
+                    target = endemic + (current - endemic) * (1 - decay_rate)
                     new_prevalence[i] = np.clip(
-                        target + self.rng.normal(0, 0.02),
-                        endemic * 0.5, 0.95
+                        target + self.rng.normal(0, 0.01),
+                        0.0, 0.95
                     )
         
         self.disease_prevalence = new_prevalence
