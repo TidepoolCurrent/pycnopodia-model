@@ -495,6 +495,12 @@ class NetworkSimulation:
         self.populations *= np.clip(noise, 0.9, 1.1)
         self.populations = np.maximum(self.populations, 0)
         
+        # DISCRETE EXTINCTION: sites with <1 individual go extinct
+        # (Can't have 0.3 individuals)
+        self.populations[self.populations < 1] = 0
+        self.adults[self.populations == 0] = 0
+        self.juveniles[self.populations == 0] = 0
+        
         # Split back to adults/juveniles (maintain ratio)
         total = self.populations.sum()
         if total > 0:
@@ -518,44 +524,46 @@ class NetworkSimulation:
     
     def _update_disease_spread(self, year: int):
         """
-        Disease spreads through network from initial site.
-        Uses connectivity matrix - disease follows larvae/currents.
-        """
-        # Initialize disease at onset
-        if year == self.config.disease_onset_year:
-            # Onset site, clipped to valid range
-            onset_site = min(self.config.disease_onset_site, self.config.n_sites - 1)
-            self.disease_prevalence[onset_site] = 0.9  # Initial outbreak
+        Disease spreads as WAVE through network from initial site.
         
-        # Spread to connected sites
+        Real SSWD spread rapidly along the coast - not gradual seeding.
+        Models epidemic wave propagation.
+        """
+        # Initialize disease at onset - starts as epidemic
+        if year == self.config.disease_onset_year:
+            onset_site = min(self.config.disease_onset_site, self.config.n_sites - 1)
+            self.disease_prevalence[onset_site] = 0.95  # Full outbreak
+        
+        # Disease spreads as a WAVE to adjacent sites
         new_prevalence = self.disease_prevalence.copy()
         
         for i in range(self.config.n_sites):
-            if self.disease_prevalence[i] < 0.01:
-                # Site is disease-free, check if neighbors are infected
-                # Probability of infection from connected sites
-                infection_pressure = 0.0
+            if self.disease_prevalence[i] < 0.1:
+                # Site is disease-free
+                # Check if ANY connected site has disease
+                has_infected_neighbor = False
                 for j in range(self.config.n_sites):
-                    if self.disease_prevalence[j] > 0.01:
-                        # Infection spreads via connectivity
-                        infection_pressure += (self.C[j, i] * 
-                                              self.disease_prevalence[j] * 
-                                              self.config.disease_spread_rate)
+                    if self.C[j, i] > 0.01 and self.disease_prevalence[j] > 0.3:
+                        has_infected_neighbor = True
+                        break
                 
-                # Stochastic infection
-                if self.rng.random() < infection_pressure:
-                    new_prevalence[i] = 0.5  # New outbreak starts at 50%
+                # Wave-like spread: high probability to catch from neighbor
+                if has_infected_neighbor:
+                    if self.rng.random() < self.config.disease_spread_rate:
+                        new_prevalence[i] = 0.9  # Epidemic hits hard
             else:
-                # Site is infected - prevalence dynamics
-                # Can increase (more transmission) or decrease (recovery/death)
-                # Tends toward equilibrium based on resistance
-                mean_resistance = self.resistance_freqs[i]
-                equilibrium = 0.3 * (1 - mean_resistance)  # Lower if resistant
+                # Site is infected - high prevalence persists during outbreak
+                # Slowly declines to endemic level after peak
+                years_infected = 1  # Simplified
+                peak_prevalence = 0.95
+                endemic_prevalence = 0.3
                 
-                # Move toward equilibrium
-                new_prevalence[i] += 0.2 * (equilibrium - self.disease_prevalence[i])
-                new_prevalence[i] += self.rng.normal(0, 0.05)
-                new_prevalence[i] = np.clip(new_prevalence[i], 0, 0.95)
+                # Decay toward endemic
+                decay_rate = 0.1
+                target = endemic_prevalence + (peak_prevalence - endemic_prevalence) * np.exp(-decay_rate * years_infected)
+                
+                new_prevalence[i] = target + self.rng.normal(0, 0.05)
+                new_prevalence[i] = np.clip(new_prevalence[i], endemic_prevalence * 0.5, 0.98)
         
         self.disease_prevalence = new_prevalence
     
