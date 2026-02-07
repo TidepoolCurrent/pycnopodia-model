@@ -29,15 +29,22 @@ def fig1_single_trajectory():
     
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     
-    # Run with and without outplanting
+    # Run with and without outplanting - comprehensive comparison
+    # No intervention vs wild vs 50% enhanced vs 95% enhanced
     scenarios = [
         ("No intervention", NetworkConfig(n_sites=500, n_years=100)),
-        ("5k/yr × 50 sites (wild)", NetworkConfig(
+        ("Wild-caught", NetworkConfig(
             n_sites=500, n_years=100,
             outplanting_n=5000, outplanting_sites=list(range(0, 500, 10)),
             outplanting_start=15, outplant_resistance_mode='wild'
         )),
-        ("5k/yr × 50 sites (enhanced 95%)", NetworkConfig(
+        ("Enhanced 50%", NetworkConfig(
+            n_sites=500, n_years=100,
+            outplanting_n=5000, outplanting_sites=list(range(0, 500, 10)),
+            outplanting_start=15, outplant_resistance_mode='enhanced',
+            outplant_enhanced_resistance=0.50
+        )),
+        ("Enhanced 95%", NetworkConfig(
             n_sites=500, n_years=100,
             outplanting_n=5000, outplanting_sites=list(range(0, 500, 10)),
             outplanting_start=15, outplant_resistance_mode='enhanced',
@@ -45,7 +52,7 @@ def fig1_single_trajectory():
         )),
     ]
     
-    colors = ['#d62728', '#2ca02c', '#1f77b4']
+    colors = ['#d62728', '#2ca02c', '#f39c12', '#1f77b4']
     
     for (name, cfg), color in zip(scenarios, colors):
         sim = NetworkSimulation(cfg, seed=42)

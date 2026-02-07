@@ -92,12 +92,12 @@ Outplanting helps maintain genetic diversity (H/H₀) by:
 
 | Strategy | Final Population | Final Resistance |
 |----------|------------------|------------------|
-| No intervention | 0.01% | 10% |
-| 5k/yr wild-caught | 12-15% | 85-90% |
-| 5k/yr enhanced (50%) | 8-10% | 50-55% |
-| 5k/yr enhanced (95%) | 13-15% | 95% |
+| No intervention | 0.3-1% | 5-10% |
+| 5k/yr wild-caught | 9-12% | 90-95% |
+| 5k/yr enhanced (50%) | 3-5% | 55-60% |
+| 5k/yr enhanced (95%) | 11-15% | 94-95% |
 
-**Key insight:** Wild-caught outplants (from natural survivors) often outperform moderately-enhanced stock because natural selection has already enriched resistance alleles. Enhanced breeding only provides advantage when resistance approaches the 95% biological ceiling.
+**Key insight:** Wild-caught outplants (from natural survivors) often outperform moderately-enhanced stock because natural selection has already enriched resistance alleles. The 95% enhanced breeding scenario (near biological ceiling) provides the best outcomes, but wild-caught approaches similar performance due to natural selection pressure.
 
 ## Installation
 
@@ -176,14 +176,25 @@ print(f"Final resistance: {result.states[-1].mean_resistance_freq:.1%}")
 | `disease_endemic_prevalence` | 0.25 | Long-term prevalence |
 | `refugia_fraction` | 0.05 | Fraction of sites that escape disease |
 
-### Genetics
+### Genetics (Polygenic Resistance)
+
+The network model now supports **polygenic resistance** with multiple loci contributing to disease resistance, matching the individual-based model architecture.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `initial_resistance_freq` | 0.03 | Starting resistance allele frequency |
-| `resistance_effect` | 0.70 | Mortality reduction for homozygous resistant |
-| `max_resistance_freq` | 0.95 | Biological ceiling on resistance |
-| `n_loci` | 10 | Number of resistance loci |
+| `initial_resistance_freq` | 0.03 | Starting resistance allele frequency per locus |
+| `resistance_effect` | 0.70 | Total mortality reduction when all loci at 100% |
+| `max_resistance_freq` | 0.95 | Biological ceiling per locus |
+| `n_loci` | 10 | Number of resistance loci to track |
+| `locus_effects` | None | Per-locus effect sizes (if None, sampled from gamma) |
+| `locus_effect_shape` | 2.0 | Gamma shape parameter for sampling effect sizes |
+
+**Polygenic architecture:**
+- Resistance allele frequencies tracked at each locus per site: shape `(n_sites, n_loci)`
+- Selection acts independently on each locus based on its effect size
+- Genetic drift affects each locus independently
+- Gene flow transfers alleles at each locus during larval dispersal
+- Overall resistance = sum of (frequency × effect) across loci, normalized to [0, 1]
 
 ### Intervention
 

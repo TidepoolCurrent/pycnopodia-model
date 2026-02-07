@@ -161,10 +161,15 @@ def run_topology_simulations():
         for idx, year in enumerate(timepoints):
             state = result.states[min(year, len(result.states)-1)]
             
-            # Resistance allele frequency
+            # Resistance allele frequency (mean across loci for polygenic model)
             ax = axes[0, idx]
-            sites = np.arange(len(state.resistance_freqs))
-            ax.bar(sites, state.resistance_freqs, color=TOPOLOGY_COLORS[conn_type.name], alpha=0.7)
+            # Handle both 1D (legacy) and 2D (polygenic) resistance_freqs
+            if state.resistance_freqs.ndim == 2:
+                site_resistance = state.resistance_freqs.mean(axis=1)
+            else:
+                site_resistance = state.resistance_freqs
+            sites = np.arange(len(site_resistance))
+            ax.bar(sites, site_resistance, color=TOPOLOGY_COLORS[conn_type.name], alpha=0.7)
             ax.set_xlabel('Site')
             ax.set_ylabel('Resistance Freq')
             ax.set_title(f'Year {year}')
@@ -458,6 +463,12 @@ def run_intervention_comparison():
             'outplant_resistance_mode': 'enhanced',
             'outplant_enhanced_resistance': 0.5,
         },
+        'Enhanced (95% resistant)': {
+            'outplanting_n': 500,
+            'outplanting_sites': outplanting_sites,
+            'outplant_resistance_mode': 'enhanced',
+            'outplant_enhanced_resistance': 0.95,
+        },
     }
     
     results = {}
@@ -473,9 +484,9 @@ def run_intervention_comparison():
         sim = NetworkSimulation(config, seed=42)
         results[name] = sim.run()
     
-    # Plot comparison
+    # Plot comparison - population trajectory
     fig, ax = plt.subplots(figsize=(12, 7))
-    colors = ['#e74c3c', '#3498db', '#2ecc71']
+    colors = ['#e74c3c', '#3498db', '#2ecc71', '#9b59b6']
     
     for (name, result), color in zip(results.items(), colors):
         years = [s.year for s in result.states]
@@ -490,6 +501,56 @@ def run_intervention_comparison():
     ax.legend()
     ax.set_ylim(0, 1.1)
     save_figure(fig, "intervention_comparison")
+    
+    # NEW: Resistance evolution comparison figure
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # Population trajectory (log scale for bottleneck visibility)
+    ax = axes[0]
+    for (name, result), color in zip(results.items(), colors):
+        years = [s.year for s in result.states]
+        n_ratios = [max(s.n_ratio, 1e-4) for s in result.states]  # Floor for log
+        ax.plot(years, n_ratios, color=color, lw=2.5, label=name)
+    
+    ax.axhline(y=0.3, color='gray', ls='--', alpha=0.7)
+    ax.axvline(x=10, color='red', ls=':', alpha=0.5, label='Disease onset')
+    ax.axvline(x=15, color='green', ls=':', alpha=0.5, label='Outplanting starts')
+    ax.set_xlabel('Year', fontsize=12)
+    ax.set_ylabel('Population (N/N₀, log scale)', fontsize=12)
+    ax.set_title('Population Trajectory', fontsize=12, fontweight='bold')
+    ax.set_yscale('log')
+    ax.set_ylim(1e-4, 1.5)
+    ax.legend(loc='lower right')
+    
+    # Resistance evolution
+    ax = axes[1]
+    for (name, result), color in zip(results.items(), colors):
+        years = [s.year for s in result.states]
+        resistance = [s.mean_resistance_freq * 100 for s in result.states]
+        ax.plot(years, resistance, color=color, lw=2.5, label=name)
+    
+    ax.axhline(y=95, color='gray', ls='--', alpha=0.7, label='95% ceiling')
+    ax.axvline(x=10, color='red', ls=':', alpha=0.5)
+    ax.axvline(x=15, color='green', ls=':', alpha=0.5)
+    ax.set_xlabel('Year', fontsize=12)
+    ax.set_ylabel('Resistance Allele Frequency (%)', fontsize=12)
+    ax.set_title('Resistance Evolution', fontsize=12, fontweight='bold')
+    ax.set_ylim(0, 100)
+    ax.legend(loc='lower right')
+    
+    plt.tight_layout()
+    save_figure(fig, "intervention_resistance_comparison")
+    
+    # Print summary statistics
+    print("\n  Intervention Summary:")
+    print("  " + "-"*60)
+    print(f"  {'Strategy':<30} {'Final N/N₀':>12} {'Final R%':>10}")
+    print("  " + "-"*60)
+    for name, result in results.items():
+        final_n = result.final_n_ratio
+        final_r = result.states[-1].mean_resistance_freq * 100
+        print(f"  {name:<30} {final_n:>11.2%} {final_r:>9.1f}%")
+    print("  " + "-"*60)
     
     # Timing comparison
     print("\n  Running timing comparison...")

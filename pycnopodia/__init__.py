@@ -26,8 +26,17 @@ from .real_data import (
     generate_temperature_scenario,
     get_larval_connectivity,
 )
+from .pacific_coast import (
+    PacificCoastConfig,
+    PacificCoastSimulation,
+    PacificCoastResult,
+    PACIFIC_COAST_REGIONS,
+    REGION_ORDER,
+    RegionType,
+    RegionConfig,
+)
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __all__ = [
     "Population", 
     "Simulation", 
@@ -39,4 +48,10 @@ __all__ = [
     "SpatialPopulation",
     "HierarchicalSRSConfig",
     "HierarchicalSRS",
+    "PacificCoastConfig",
+    "PacificCoastSimulation",
+    "PacificCoastResult",
+    "PACIFIC_COAST_REGIONS",
+    "REGION_ORDER",
+    "RegionType",
 ]

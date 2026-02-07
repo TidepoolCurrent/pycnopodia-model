@@ -171,4 +171,12 @@ PRESETS = {
         temperature_dependent_sswd=True,
         # Assume 2C warming over simulation
     ),
+    
+    # High resistance outplanting (95% - biological ceiling)
+    # Represents best-case selective breeding outcome
+    "high_resistance_outplant": Config(
+        outplanting_n_per_year=500,
+        broodstock_n_parents=50,
+        broodstock_resistance_freq=0.95,
+    ),
 }
