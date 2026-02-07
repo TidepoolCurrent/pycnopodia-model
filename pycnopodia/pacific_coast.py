@@ -210,7 +210,7 @@ class PacificCoastConfig:
     # Tuned to produce ~90% range-wide decline with temperature-dependent mortality
     # Alaska (cold) keeps ~40%, BC Fjords (refugia) ~50%, south ~0%
     disease_base_mortality: float = 0.85  # Base per-year mortality at threshold temp (acute phase)
-    disease_transmission_rate: float = 0.60
+    disease_transmission_rate: float = 1.20  # Fast coastal spread
     disease_endemic_prevalence: float = 0.03  # Low background after acute phase
     disease_acute_years: int = 3  # Acute outbreak lasts ~3 years
     
@@ -228,7 +228,7 @@ class PacificCoastConfig:
     
     # Connectivity decay
     larval_dispersal_scale: float = 8.0  # Sites (e-folding distance)
-    disease_dispersal_scale: float = 15.0  # Wider for disease
+    disease_dispersal_scale: float = 30.0  # Very wide — SSWD spread entire coast in ~2yr
     
     # Within-region vs between-region connectivity
     within_region_weight: float = 0.6
@@ -299,7 +299,7 @@ def build_sites(config: PacificCoastConfig, rng: np.random.Generator = None) -> 
             if region.region_type == RegionType.FJORD:
                 refugia_prob = 0.70  # Many deep-water refugia in fjords
             elif region.short_name == "SE AK N":
-                refugia_prob = 0.25  # Northern fjord refugia
+                refugia_prob = 0.35  # Northern fjord refugia
             elif region.short_name == "SE AK S":
                 refugia_prob = 0.15  # Some deep-water refugia
             elif region.region_type == RegionType.INLAND_SEA:
@@ -538,9 +538,9 @@ def build_disease_connectivity_matrix(
             source_inland = source_region.region_type in inland_types
             target_inland = target_region.region_type in inland_types
             
-            # Crossing inland/outer boundary - reduced transmission
+            # Crossing inland/outer boundary - strongly reduced transmission
             if source_inland != target_inland:
-                D[i, j] = base_weight * 0.1 * temp_mod
+                D[i, j] = base_weight * 0.02 * temp_mod
             else:
                 # Within outer coast - moderate spread
                 D[i, j] = base_weight * 0.4 * temp_mod

@@ -1215,7 +1215,7 @@ def main():
     # Run main simulation
     print("\n🌊 Running simulation...")
     config = PacificCoastConfig(n_years=100)
-    sim = PacificCoastSimulation(config, seed=42)
+    sim = PacificCoastSimulation(config, seed=43)
     result = sim.run()
     
     print(f"  Completed: {len(result.sites)} sites, {len(result.states)} years")
