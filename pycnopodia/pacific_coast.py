@@ -861,8 +861,22 @@ class PacificCoastSimulation:
                                 temp_mod
                             )
                     
-                    # Probability of infection
-                    infection_prob = 1.0 - np.exp(-transmission_pressure * 15.0)
+                    # Within-region rapid spread: if ANY site in same region
+                    # is already infected, disease spreads fast locally
+                    region_id = self.sites[i].region_id
+                    r_start, r_end = self.region_boundaries[region_id]
+                    region_infected = any(
+                        self.disease_prevalence[j] > 0.1 
+                        for j in range(r_start, r_end) if j != i
+                    )
+                    
+                    if region_infected:
+                        # Within-region spread is very fast (SSWD spread 
+                        # through entire regions in months, not years)
+                        infection_prob = 0.90  # Near-certain within 1 year
+                    else:
+                        # Between-region spread via connectivity matrix
+                        infection_prob = 1.0 - np.exp(-transmission_pressure * 15.0)
                     
                     if self.rng.random() < infection_prob:
                         new_prevalence[i] = 0.80 + self.rng.uniform(0, 0.15)
