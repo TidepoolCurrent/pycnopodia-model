@@ -31,7 +31,7 @@ class NetworkConfig:
     # Real population: ~6 billion individuals (human input)
     # Using scaled representation for computational tractability
     n_sites: int = 1000
-    n_per_site: int = 10000  # 10M total (scaled from 6B, ratio-based outputs still valid)
+    n_per_site: int = 1200  # Start below K (carrying_capacity_per_site=1500)
     
     # Connectivity parameters
     connectivity_type: ConnectivityType = ConnectivityType.STEPPING_STONE
@@ -596,18 +596,43 @@ class NetworkSimulation:
     
     def _apply_selection(self):
         """
-        Selection increases resistance allele frequency.
-        Survivors of disease are more resistant on average.
-        Capped at max_resistance_freq (biological ceiling).
+        Selection via differential survival.
+        
+        Resistant individuals survive disease at higher rates,
+        shifting allele frequency upward. Uses standard
+        single-locus selection model:
+        
+            p' = p * w_R / w_bar
+        
+        where:
+            p = resistance allele frequency
+            w_R = fitness of resistant genotype (higher survival)
+            w_S = fitness of susceptible genotype (lower survival)
+            w_bar = p * w_R + (1-p) * w_S  (mean fitness)
         """
         max_r = self.config.max_resistance_freq
+        mortality_rate = self.config.disease_mortality
+        resistance_effect = self.config.resistance_effect
+        
         for i in range(self.config.n_sites):
             if self.disease_prevalence[i] > 0.1:
-                # Strong selection when disease is present
-                # Increase resistance frequency (simplified)
-                selection_strength = self.disease_prevalence[i] * 0.02
-                self.resistance_freqs[i] += selection_strength
-                self.resistance_freqs[i] = min(self.resistance_freqs[i], max_r)
+                p = self.resistance_freqs[i]
+                prevalence = self.disease_prevalence[i]
+                
+                # Fitness = survival probability during disease event
+                # Susceptible: survive at (1 - mortality * prevalence)
+                # Resistant: mortality reduced by resistance_effect
+                w_S = 1.0 - mortality_rate * prevalence
+                w_R = 1.0 - mortality_rate * prevalence * (1.0 - resistance_effect)
+                
+                # Mean fitness
+                w_bar = p * w_R + (1.0 - p) * w_S
+                
+                if w_bar > 0:
+                    # New allele frequency after selection
+                    p_prime = p * w_R / w_bar
+                    self.resistance_freqs[i] = min(p_prime, max_r)
+                # If w_bar == 0, everyone dies - freq unchanged
     
     def _reproduce(self) -> np.ndarray:
         """
