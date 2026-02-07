@@ -69,10 +69,17 @@ class NetworkConfig:
     initial_resistance_freq: float = 0.1  # Starting resistance allele frequency
     resistance_effect: float = 0.5  # Mortality reduction for homozygous resistant
     
-    # Intervention
-    outplanting_per_site: int = 0  # Juveniles added per site per year
-    outplanting_sites: List[int] = field(default_factory=list)
-    outplanting_start: int = 15
+    # Intervention - OUTPLANTING
+    outplanting_n: int = 100  # Number of stars per outplanting event
+    outplanting_sites: List[int] = field(default_factory=list)  # Which sites receive outplants
+    outplanting_start: int = 15  # Year outplanting begins
+    outplanting_interval: int = 1  # Years between outplanting events
+    
+    # Outplant genetics
+    # "wild" = same resistance freq as local wild population
+    # "enhanced" = unusually high resistance (e.g., from selective breeding)
+    outplant_resistance_mode: str = "wild"  # "wild" or "enhanced"
+    outplant_enhanced_resistance: float = 0.5  # Resistance freq if enhanced mode
     
     # Simulation
     n_years: int = 100
@@ -475,9 +482,10 @@ class NetworkSimulation:
         
         # 10. Outplanting
         if (year >= self.config.outplanting_start and 
-            self.config.outplanting_per_site > 0):
-            for site in self.config.outplanting_sites:
-                self.juveniles[site] += self.config.outplanting_per_site
+            self.config.outplanting_n > 0 and
+            len(self.config.outplanting_sites) > 0 and
+            (year - self.config.outplanting_start) % self.config.outplanting_interval == 0):
+            self._apply_outplanting()
         
         # Update total populations
         self.populations = self.adults + self.juveniles
@@ -668,6 +676,44 @@ class NetworkSimulation:
                 drift_var = p * (1 - p) / (2 * max(n, 10))
                 drift = self.rng.normal(0, np.sqrt(drift_var))
                 self.resistance_freqs[i] = np.clip(p + drift, 0.01, 0.99)
+    
+    def _apply_outplanting(self):
+        """
+        Add outplanted stars to designated sites.
+        
+        Outplants can have:
+        - "wild" resistance: same as local wild population
+        - "enhanced" resistance: higher resistance from selective breeding
+        
+        Updates both population counts and allele frequencies.
+        """
+        n_outplants = self.config.outplanting_n
+        
+        for site in self.config.outplanting_sites:
+            if site >= self.config.n_sites:
+                continue
+            
+            # Current population and genetics at site
+            current_n = self.populations[site]
+            current_p = self.resistance_freqs[site]
+            
+            # Determine outplant resistance frequency
+            if self.config.outplant_resistance_mode == "enhanced":
+                outplant_p = self.config.outplant_enhanced_resistance
+            else:  # "wild" - match local population
+                outplant_p = current_p
+            
+            # Add outplants as juveniles
+            self.juveniles[site] += n_outplants
+            
+            # Update allele frequency (weighted average)
+            new_n = current_n + n_outplants
+            if new_n > 0:
+                new_p = (current_n * current_p + n_outplants * outplant_p) / new_n
+                self.resistance_freqs[site] = new_p
+            
+            # Update heterozygosity
+            self.heterozygosity[site] = 2 * self.resistance_freqs[site] * (1 - self.resistance_freqs[site])
 
 
 def run_scenario(
