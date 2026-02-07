@@ -1,432 +1,205 @@
 # Pycnopodia Population Model
 
-**Individual-based simulation of sunflower sea star (*Pycnopodia helianthoides*) population recovery.**
-
-All outputs are **ratios relative to baseline** (e.g., N/N₀ = 0.30 means 30% of starting population), making results directly comparable across scenarios.
-
-![Population trajectory](figures/population_trajectory.png)
-
----
-
-## Table of Contents
-
-1. [Quick Start](#quick-start)
-2. [Why Ratios?](#why-ratios)
-3. [Model Overview](#model-overview)
-4. [The Math (with Plain English)](#the-math-with-plain-english)
-   - [Sweepstakes Reproductive Success](#1-sweepstakes-reproductive-success-srs)
-   - [Allee Effects](#2-allee-effects-fertilization-failure)
-   - [Disease Dynamics](#3-disease-dynamics-sswd)
-   - [Genetic Resistance](#4-genetic-resistance)
-   - [Population Metrics](#5-population-metrics)
-5. [Key Findings](#key-findings)
-6. [Installation & Usage](#installation--usage)
-7. [References](#references)
-
----
-
-## Quick Start
-
-```bash
-# Install
-pip install numpy
-git clone https://github.com/TidepoolCurrent/pycnopodia-model
-cd pycnopodia-model
-
-# Run baseline scenario
-python run_simulation.py --n-replicates 50
-```
-
-**Example output:**
-```
-OUTCOMES:
-  Extinction probability:  0.0%
-  Recovery probability:    100.0% (to 30% of baseline)
-
-FINAL STATE (as fraction of baseline):
-  Population (N/N₀):       140.77% ± 1.56%
-  Diversity (H/H₀):        178.84% ± 10.55%
-
-BOTTLENECK:
-  Minimum (N/N₀):          22.68%
-  Year of minimum:         13.9
-```
-
----
-
-## Why Ratios?
-
-**Absolute numbers are arbitrary.** If I say "the population dropped to 847 individuals," you can't interpret that without knowing the starting point.
-
-**Ratios are immediately meaningful:**
-
-| Metric | What it means |
-|--------|---------------|
-| N/N₀ = 0.05 | Population crashed to **5% of baseline** |
-| H/H₀ = 0.27 | **73% of genetic diversity lost** |
-| Ne/N = 0.10 | Effective population is **10× smaller** than census |
-
-These ratios are directly comparable across scenarios, regardless of starting population size.
-
----
-
-## Model Overview
-
-![Model structure](figures/model_overview.png)
-
-The model simulates annual cycles of:
-
-1. **Natural mortality** (age-specific survival)
-2. **Disease mortality** (SSWD, modulated by genetic resistance)
-3. **Reproduction** (sweepstakes success + Allee effects)
-4. **Outplanting** (captive-bred juveniles added)
-5. **Aging** (individuals get one year older)
-
-Each individual has:
-- A **genome** (20 resistance loci, each 0/1/2 copies of resistance allele)
-- An **age** (0-25 years)
-- A **sex** (for reproduction)
-
----
-
-## The Math (with Plain English)
-
-### 1. Sweepstakes Reproductive Success (SRS)
-
-![SRS effect](figures/srs_effect.png)
-
-**The problem:** In broadcast spawners like sea stars, not all adults successfully reproduce each year. A few "winners" contribute most of the offspring.
-
-**Plain English:** Imagine 1,000 adults trying to reproduce, but only ~80 (8%) actually contribute offspring. The rest spawn, but their gametes don't find mates or their larvae don't survive.
-
-**The math:**
-
-Each year, the fraction of adults that successfully breed is drawn from a Beta distribution:
-
-```
-breeding_fraction ~ Beta(α, β)
-
-where:
-  mean = α / (α + β) = 0.08     (8% of adults breed)
-  α = mean × shape = 0.4
-  β = (1 - mean) × shape = 4.6
-  shape = 5 (controls variance)
-```
-
-**Why it matters:** If only 8% breed, the effective population size (Ne) drops to roughly 8% of the census size. Evolution "sees" a population 10× smaller than what you count.
-
-```
-Ne/N ≈ breeding_fraction ≈ 0.08
-```
-
-This means genetic drift is 10× faster, adaptation is 10× slower, and inbreeding accumulates 10× faster than you'd expect from counting heads.
-
----
-
-### 2. Allee Effects (Fertilization Failure)
-
-![Allee effect](figures/allee_effect.png)
-
-**The problem:** Broadcast spawners release eggs and sperm into the water. At low density, gametes can't find each other.
-
-**Plain English:** If there are only 10 adults spread across a reef, the sperm from one individual is unlikely to encounter eggs from another. Fertilization fails not because individuals are unhealthy, but because they're too spread out.
-
-**The math:**
-
-Fertilization success follows a saturating function:
-
-```
-fertilization = N² / (N² + h²)
-
-where:
-  N = number of adults in the area
-  h = half-saturation constant (default 30)
-```
-
-| Adults (N) | Fertilization |
-|------------|---------------|
-| 10 | 10% |
-| 30 | 50% |
-| 100 | 92% |
-| 200 | 98% |
-
-**Why it matters:** Once populations drop below ~30 adults, reproduction starts failing. This creates a "death spiral" where low population → poor fertilization → even lower population.
-
-**Alternative (Levitan mechanistic model):**
-
-For detailed sperm-egg collision kinetics:
-
-```
-fertilization = 1 - exp(-β₀ × S × τ / V)
-
-where:
-  β₀ = collision rate (egg size, current speed)
-  S = sperm concentration (sperm per volume)
-  τ = fertilization window duration
-  V = water volume around spawning female
-```
-
----
-
-### 3. Disease Dynamics (SSWD)
-
-![Disease dynamics](figures/disease_dynamics.png)
-
-**The problem:** Sea Star Wasting Disease (SSWD) devastated *Pycnopodia* populations starting in 2013, with 90%+ mortality in many areas.
-
-**Plain English:** The disease hits hard at first (90% of animals infected), then settles into a lower "background" level (20%) as susceptible individuals die off and survivors remain.
-
-**The math:**
-
-Disease prevalence follows an epidemic → endemic trajectory:
-
-```
-P(t) = P_endemic + (P_peak - P_endemic) × exp(-δ × (t - t_onset))
-
-where:
-  P_peak = 0.90      (90% infected at peak)
-  P_endemic = 0.20   (20% long-term)
-  δ = 0.10           (decay rate)
-  t_onset = 10       (year epidemic begins)
-```
-
-**Mortality depends on resistance:**
-
-```
-individual_mortality = base_mortality × (1 - resistance_score)
-
-where:
-  base_mortality = 0.60 (adults) or 0.40 (juveniles)
-  resistance_score = sum of resistance allele effects (0 to 1)
-```
-
-A fully resistant individual (score = 1.0) has zero disease mortality. A fully susceptible individual (score = 0) has 60% annual mortality during high prevalence.
-
----
-
-### 4. Genetic Resistance
-
-**The problem:** Some individuals survive SSWD better than others. This appears to have a genetic basis.
-
-**Plain English:** Resistance is like a shield that reduces how badly the disease affects you. Some individuals have stronger shields (more resistance alleles), others have weaker ones.
-
-**The math:**
-
-We model 20 unlinked loci (gene locations). Each can have 0, 1, or 2 copies of the resistance allele:
-
-```
-resistance_score = Σᵢ (genotype_i × effect_i)
-
-where:
-  genotype_i = 0, 1, or 2 (copies of resistance allele at locus i)
-  effect_i = 0.035 (3.5% mortality reduction per allele copy)
-  i = 1 to 20 loci
-```
-
-With 20 loci × 2 copies × 3.5% effect = maximum 140% reduction (capped at 100%).
-
-**Inheritance:**
-
-Offspring inherit one allele from each parent at each locus (Mendelian inheritance with recombination between loci).
-
-**Selection:**
-
-Resistant individuals survive disease better → leave more offspring → resistance allele frequency increases. This is natural selection in action.
-
----
-
-### 5. Population Metrics
-
-**Census size (N):** Simply count living individuals.
-
-**Effective population size (Ne):** The size of an ideal population with equivalent genetic drift.
-
-```
-Ne = (4 × Nf × Nm) / (Nf + Nm)
-
-where:
-  Nf = number of females that successfully bred
-  Nm = number of males that successfully bred
-```
-
-**Long-term Ne:** Harmonic mean across years (because drift accumulates from bottlenecks):
-
-```
-Ne_long = t / Σ(1/Ne_t)
-```
-
-**Expected heterozygosity (H):** Genetic diversity measure.
-
-```
-H = 2pq = 2p(1-p)
-
-where p = resistance allele frequency
-```
-
-When p = 0.5, H is maximized. When p is close to 0 or 1, H is low.
-
-**Ratios (the outputs you actually interpret):**
-
-| Ratio | Meaning | Good values |
-|-------|---------|-------------|
-| N/N₀ | Population vs baseline | > 0.30 (recovered) |
-| H/H₀ | Diversity retention | > 0.90 (healthy) |
-| Ne/N | Effective vs census | > 0.10 (typical) |
-
----
+Network-based metapopulation model for *Pycnopodia helianthoides* (sunflower sea star) recovery following Sea Star Wasting Disease (SSWD).
 
 ## Key Findings
 
-![Genetic diversity](figures/genetic_diversity.png)
+### Without Intervention: Extinction
 
-### 1. SRS is the critical bottleneck
+With parameters calibrated to observed SSWD dynamics:
+- **99% mortality** (expert input: "closer to 99%, maybe higher")
+- **0.5% initial resistance** (extremely rare before outbreak)
+- **6 billion pre-outbreak population**
 
-Even with only 8% breeding each year, effective population size drops to ~10% of census. This means:
-- Genetic drift is 10× faster than expected
-- Adaptation to disease is 10× slower
-- Inbreeding accumulates 10× faster
+The model shows complete extinction within 4 years of disease onset:
 
-### 2. Outplanting is necessary for recovery
+| Year | Population | Notes |
+|------|------------|-------|
+| 10 | 100% | Disease arrives |
+| 11 | 9% | Rapid collapse |
+| 12 | 1.5% | Near-extinction |
+| 14 | 0% | Extinct |
 
-| Scenario | Extinction | Final N/N₀ | Final H/H₀ |
-|----------|------------|------------|------------|
-| With outplanting | 0% | 141% | 179% |
-| Without | **75%** | **5%** | **27%** |
+### Outplanting Prevents Extinction
 
-Without intervention, most populations go extinct or crash to <5% of baseline.
+Even minimal outplanting (100 individuals/year to 10 sites) prevents extinction, but population remains tiny:
 
-### 3. Broodstock diversity matters
+| Scenario | Extinction | Final Pop | Resistance |
+|----------|------------|-----------|------------|
+| No intervention | 100% | 0% | — |
+| 100/yr × 10 sites | 0% | 0.01% | evolving |
+| 1k/yr × 50 sites | 0% | 1% | 99% |
+| 5k/yr × 100 sites | 0% | 10% | 99% |
+| 10k/yr × 100 sites | 0% | 20% | 98% |
 
-With only 6 broodstock parents, genetic diversity in outplanted juveniles is limited. Need ≥30 parents for evolutionary (not just demographic) rescue.
+### Natural Selection Drives Recovery
 
-### 4. Timing is critical
+The most striking result: **resistance allele frequency evolves from 0.5% to 98%** under selection pressure. Survivors carry resistance alleles, and outplanting from wild survivors is more effective than artificial selection:
 
-Intervention within 5-10 years of epidemic onset is far more effective than waiting. Early action prevents the Allee effect death spiral.
+| Outplant Source | Final Pop | Final Resistance |
+|-----------------|-----------|------------------|
+| Wild survivors | 20% | 98% |
+| Enhanced (50% resistance) | 17% | 52% |
 
-### 5. Southern populations need direct intervention
+**Why wild works better:** Surviving wild individuals have already been selected for resistance. Adding individuals with only 50% resistance *dilutes* the high-resistance gene pool.
 
-Adult migration (~0.5%/year) is too slow to rescue collapsed California/Oregon populations from healthy Alaska stocks.
+### Policy Implications
 
----
+1. **Outplanting is necessary** — without intervention, extinction is certain
+2. **Scale matters** — 10,000/year to 100 sites needed for meaningful recovery (20% of baseline in 100 years)
+3. **Source population matters** — captive breeding from survivors preferred over artificial selection
+4. **Time horizon is long** — recovery to 20% takes ~100 years even with intensive intervention
+5. **Resistance evolution is the mechanism** — the population that survives is genetically different from the pre-disease population
 
-## Installation & Usage
+## Model Architecture
 
-### Requirements
+### Network Structure
 
-- Python 3.8+
-- NumPy
+- **1000 sites** (scaled representation of range)
+- **10,000 individuals per site** (scaled from 6 billion total)
+- **Connectivity matrix** controls larval dispersal between sites
+- **Ratio-based outputs** — all results as fraction of baseline
 
-### Installation
+### Connectivity Types
+
+| Type | Description | Extinction Risk |
+|------|-------------|-----------------|
+| Uniform | All sites equally connected | Highest (dilution) |
+| Stepping-stone | Only neighbors connected | Lowest |
+| Distance-decay | Decreasing with distance | Moderate |
+| Asymmetric | Directional (current-like) | Variable |
+| Hub-network | Few highly-connected sites | Moderate |
+| Modular | Clusters | Low |
+
+**Key finding:** Stepping-stone connectivity is most protective. Uniform dispersal causes "dilution death spiral" where survivors spread too thin to rebuild.
+
+### Disease Dynamics
+
+Calibrated to observed SSWD:
+- **Simultaneous multi-site outbreak** (10% of sites initially)
+- **90% spread rate per year** (matches rapid coastal spread)
+- **99% mortality** when infected
+- **Endemic persistence** at 25% prevalence
+- **Minimal recovery** (1% per year)
+
+### Genetics
+
+- **10 resistance loci** (simplified from ~51 in real genome)
+- **Additive effects** — each resistance allele reduces mortality
+- **Resistance effect:** 40% mortality reduction for homozygotes (99% → 59%)
+- **Selection strength:** ~0.30 per locus (extremely strong)
+- **Gene flow** via larval dispersal
+
+## Installation
 
 ```bash
-pip install numpy
-git clone https://github.com/TidepoolCurrent/pycnopodia-model
+git clone https://github.com/TidepoolCurrent/pycnopodia-model.git
 cd pycnopodia-model
 pip install -e .
 ```
 
-### Command Line
+## Usage
 
-```bash
-# Baseline with outplanting
-python run_simulation.py
-
-# Compare to no intervention
-python run_simulation.py --no-outplanting
-
-# Different scenarios
-python run_simulation.py --preset extreme_srs
-python run_simulation.py --preset metapopulation
-
-# Custom parameters
-python run_simulation.py --n-replicates 100 --n-years 100 --recovery-threshold 0.50
-```
-
-### Python API
+### Basic Simulation
 
 ```python
-from pycnopodia import Simulation, Config
+from pycnopodia.network import NetworkSimulation, NetworkConfig
 
-config = Config(
-    initial_population=1200,
-    srs_mean=0.08,
-    sswd_peak_prevalence=0.90,
-    outplanting_n_per_year=200,
-)
-
-sim = Simulation(config, seed=42)
+# Default parameters (99% mortality, 0.5% resistance)
+config = NetworkConfig(n_sites=100, n_years=50)
+sim = NetworkSimulation(config, seed=42)
 result = sim.run()
 
-print(f"Final N/N₀: {result.final_n_ratio:.1%}")
-print(f"Min N/N₀: {result.min_n_ratio:.1%} (year {result.bottleneck_year})")
-print(f"Recovered: {result.recovered(threshold=0.30)}")
+print(f"Final population: {result.final_n_ratio:.1%} of baseline")
+print(f"Bottleneck: {result.min_n_ratio:.1%}")
+print(f"Extinct: {result.extinct}")
 ```
 
-### Configuration Presets
+### Outplanting Scenario
 
-| Preset | Description |
-|--------|-------------|
-| `baseline` | Default parameters with outplanting |
-| `no_disease` | Control scenario without SSWD |
-| `extreme_srs` | Only 2% of adults breed (extreme sweepstakes) |
-| `wright_fisher` | All adults breed equally (no SRS, unrealistic) |
-| `high_outplanting` | 500 juveniles/year, 50 broodstock |
-| `limited_broodstock` | Only 6 parents (genetic bottleneck) |
-| `metapopulation` | 5 subpopulations (Alaska → California) |
-| `climate_warming` | Temperature-dependent SSWD |
+```python
+config = NetworkConfig(
+    n_sites=1000,
+    n_years=100,
+    outplanting_n=5000,           # 5000 individuals per event
+    outplanting_sites=list(range(0, 1000, 10)),  # 100 sites
+    outplanting_start=15,          # Start 5 years after disease
+    outplant_resistance_mode='wild',  # Use wild survivors
+)
 
----
+sim = NetworkSimulation(config, seed=42)
+result = sim.run()
+```
 
-## Demography Parameters
+### Compare Connectivity Scenarios
 
-| Stage | Ages | Annual Survival | Source |
-|-------|------|-----------------|--------|
-| Settled juvenile | 0 | 15% | High post-settlement mortality |
-| Juvenile | 1-4 | 70% | Pre-reproductive |
-| Adult | 5-18 | 88% | Reproductive adults |
-| Senescent | 19+ | 26% | Rapid decline |
+```python
+from pycnopodia.network import run_scenario, ConnectivityType
 
-Maturation at age 5 (Hodin et al. 2021). Maximum lifespan 25 years.
+result = run_scenario(
+    connectivity_type=ConnectivityType.STEPPING_STONE,
+    self_recruitment=0.5,
+    n_replicates=10,
+    n_years=50,
+)
+print(f"Extinction probability: {result['extinction_probability']:.0%}")
+```
 
----
+## Parameters
 
-## References
+### Demographics
 
-1. **Hedgecock D, Pudovkin AI (2011).** Sweepstakes reproductive success in highly fecund marine fish and shellfish: A review and commentary. *Bulletin of Marine Science* 87:971-1002.
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `n_sites` | 1000 | Number of sites in network |
+| `n_per_site` | 10000 | Initial individuals per site |
+| `survival_adult` | 0.95 | Annual adult survival (disease-free) |
+| `survival_juvenile` | 0.60 | Annual juvenile survival |
+| `maturation_years` | 3 | Years to reproductive maturity |
 
-2. **Schiebelhut LM, Puritz JB, Dawson MN (2024).** A high-quality reference genome for the sunflower sea star, *Pycnopodia helianthoides*. *Journal of Heredity* esae002.
+### Disease
 
-3. **Gravem SA et al. (2021).** *Pycnopodia helianthoides*. The IUCN Red List of Threatened Species 2021: e.T178290276A197818455.
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `disease_onset_year` | 10 | Year disease first appears |
+| `disease_mortality` | 0.99 | Mortality rate when infected |
+| `disease_spread_rate` | 0.90 | Fraction of sites infected per year |
+| `disease_endemic_prevalence` | 0.25 | Long-term endemic level |
 
-4. **Hodin J et al. (2021).** Culturing the sunflower sea star, *Pycnopodia helianthoides*, and considerations for its use in captive breeding programs. *Aquaculture* 542:736873.
+### Genetics
 
-5. **Levitan DR (1991).** Influence of body size and population density on fertilization success and reproductive output in a free-spawning invertebrate. *Biological Bulletin* 181:261-268.
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `n_loci` | 10 | Number of resistance loci |
+| `initial_resistance_freq` | 0.005 | Starting allele frequency |
+| `resistance_effect` | 0.40 | Mortality reduction per allele |
 
-6. **Hewson I et al. (2014).** Densovirus associated with sea-star wasting disease and mass mortality. *PNAS* 111:17278-17283.
+### Intervention
 
----
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `outplanting_n` | 0 | Individuals per outplanting event |
+| `outplanting_sites` | [] | Sites receiving outplants |
+| `outplanting_start` | 15 | Year outplanting begins |
+| `outplant_resistance_mode` | 'wild' | 'wild' or 'enhanced' |
+| `outplant_enhanced_resistance` | 0.50 | Resistance freq if enhanced |
+
+## Tests
+
+```bash
+pytest tests/ -v
+```
+
+## Citation
+
+Model developed for sunflower sea star (*Pycnopodia helianthoides*) conservation research at Friday Harbor Labs, University of Washington.
 
 ## License
 
 MIT
 
-## Authors
+## References
 
-- **Original model concept:** Weertman 2026
-- **Code implementation:** TidepoolCurrent (AI agent)
-
-*Built for kelp forest restoration research at Friday Harbor Labs.*
-
----
-
-## Model Limitations
-
-This model is a **simplification** of reality. Key limitations:
-
-1. **Spatial structure:** Single well-mixed population (metapopulation option available but simplified)
-2. **Disease mechanism:** Phenomenological, not mechanistic transmission
-3. **Environmental stochasticity:** Not included beyond SRS variance
-4. **Density dependence:** Only through Allee effects, no carrying capacity competition
-5. **Parameter uncertainty:** Many parameters estimated from limited data
-
-Use for **exploring scenarios and relative comparisons**, not predicting exact population sizes.
+- Harvell, C.D., et al. (2019). Disease epidemic and a marine heat wave are associated with the continental-scale collapse of a pivotal predator. *Science Advances*.
+- Schiebelhut, L.M., et al. (2024). Genomic signatures of disease resistance in sea stars.
+- IUCN Red List: *Pycnopodia helianthoides* — Critically Endangered (2021)
