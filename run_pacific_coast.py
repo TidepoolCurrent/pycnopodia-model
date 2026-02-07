@@ -1195,6 +1195,284 @@ def export_json(result: PacificCoastResult, output_path: str = "dashboard/data.j
     print(f"  ✓ File size: {output_path.stat().st_size / 1024:.1f} KB")
 
 
+class EnsembleResult:
+    """Container for ensemble simulation results."""
+    
+    def __init__(self, mean_trajectories, ci_low, ci_high, all_runs, config):
+        """
+        Args:
+            mean_trajectories: dict[region_id -> dict[metric -> array]]
+            ci_low: dict[region_id -> dict[metric -> array]] (2.5th percentile)
+            ci_high: dict[region_id -> dict[metric -> array]] (97.5th percentile)
+            all_runs: list of PacificCoastResult objects
+            config: PacificCoastConfig
+        """
+        self.mean_trajectories = mean_trajectories
+        self.ci_low = ci_low
+        self.ci_high = ci_high
+        self.all_runs = all_runs
+        self.config = config
+        self.n_runs = len(all_runs)
+        self.years = all_runs[0].years if all_runs else []
+
+
+def run_ensemble(n_runs: int = 20, config: PacificCoastConfig = None, verbose: bool = True) -> EnsembleResult:
+    """
+    Run ensemble of simulations with different random seeds.
+    
+    Args:
+        n_runs: Number of replicate simulations to run
+        config: PacificCoastConfig (defaults to standard config)
+        verbose: Print progress updates
+    
+    Returns:
+        EnsembleResult with mean trajectories and 95% confidence intervals
+    """
+    if config is None:
+        config = PacificCoastConfig(n_years=100)
+    
+    if verbose:
+        print(f"\n🔄 Running ensemble with {n_runs} replicates...")
+    
+    all_results = []
+    
+    for seed in range(n_runs):
+        if verbose and (seed + 1) % 5 == 0:
+            print(f"  Completed {seed + 1}/{n_runs} runs...")
+        
+        sim = PacificCoastSimulation(config, seed=seed)
+        result = sim.run()
+        all_results.append(result)
+    
+    if verbose:
+        print(f"  ✓ All {n_runs} runs complete!")
+    
+    # Collect trajectories from all runs
+    # Structure: runs[run_idx][region_id][metric][year]
+    n_years = len(all_results[0].years)
+    
+    # Initialize storage for all runs
+    all_trajectories = {region_id: {
+        "population_ratio": np.zeros((n_runs, n_years)),
+        "resistance": np.zeros((n_runs, n_years)),
+        "disease_prevalence": np.zeros((n_runs, n_years)),
+    } for region_id in REGION_ORDER}
+    
+    # Collect data from each run
+    for run_idx, result in enumerate(all_results):
+        trajectories = result.get_region_trajectories()
+        for region_id in REGION_ORDER:
+            for metric in ["population_ratio", "resistance", "disease_prevalence"]:
+                all_trajectories[region_id][metric][run_idx, :] = trajectories[region_id][metric]
+    
+    # Compute mean and confidence intervals
+    mean_trajectories = {}
+    ci_low = {}
+    ci_high = {}
+    
+    for region_id in REGION_ORDER:
+        mean_trajectories[region_id] = {}
+        ci_low[region_id] = {}
+        ci_high[region_id] = {}
+        
+        for metric in ["population_ratio", "resistance", "disease_prevalence"]:
+            data = all_trajectories[region_id][metric]
+            mean_trajectories[region_id][metric] = np.mean(data, axis=0)
+            ci_low[region_id][metric] = np.percentile(data, 2.5, axis=0)
+            ci_high[region_id][metric] = np.percentile(data, 97.5, axis=0)
+    
+    return EnsembleResult(mean_trajectories, ci_low, ci_high, all_results, config)
+
+
+def plot_ensemble_trajectories(ensemble: EnsembleResult):
+    """
+    Plot ensemble mean trajectories with 95% confidence intervals.
+    
+    Shows mean population ratio per region as solid line with shaded CI band.
+    Matches style of plot_population_trajectories_by_region.
+    """
+    print("\n📊 Generating ensemble trajectory plot...")
+    
+    years = ensemble.years
+    config = ensemble.config
+    
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    for region_id in REGION_ORDER:
+        region = config.regions[region_id]
+        
+        mean = ensemble.mean_trajectories[region_id]["population_ratio"]
+        ci_low = ensemble.ci_low[region_id]["population_ratio"]
+        ci_high = ensemble.ci_high[region_id]["population_ratio"]
+        
+        # Plot mean line
+        ax.plot(
+            years, mean,
+            label=region.short_name,
+            color=region.color,
+            linewidth=2,
+        )
+        
+        # Plot 95% CI as shaded band
+        ax.fill_between(
+            years, ci_low, ci_high,
+            color=region.color,
+            alpha=0.2,
+        )
+    
+    ax.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5, label='Baseline')
+    ax.axhline(y=0.1, color='gray', linestyle=':', alpha=0.5, label='10% threshold')
+    ax.axvline(x=config.disease_onset_year, color='red', linestyle=':', alpha=0.5, label='Disease onset')
+    
+    ax.set_xlabel("Year", fontsize=12)
+    ax.set_ylabel("Population Ratio (relative to initial)", fontsize=12)
+    ax.set_title(f"Ensemble Population Trajectories (n={ensemble.n_runs}, mean ± 95% CI)", fontsize=14)
+    ax.legend(loc='upper right', fontsize=9)
+    ax.set_yscale('log')
+    ax.set_ylim(1e-4, 2.0)
+    ax.grid(True, alpha=0.3, which='both')
+    
+    plt.tight_layout()
+    save_figure(fig, "10_ensemble_trajectories")
+
+
+def plot_ensemble_summary(ensemble: EnsembleResult):
+    """
+    Plot ensemble summary: mean final survival per region with 95% CI error bars.
+    
+    Bar chart showing final population ratio by region.
+    """
+    print("\n📊 Generating ensemble summary plot...")
+    
+    config = ensemble.config
+    
+    # Get final year index
+    final_year_idx = -1
+    
+    # Extract final values for each region
+    regions = []
+    means = []
+    ci_lows = []
+    ci_highs = []
+    colors = []
+    
+    for region_id in REGION_ORDER:
+        region = config.regions[region_id]
+        regions.append(region.short_name)
+        
+        mean = ensemble.mean_trajectories[region_id]["population_ratio"][final_year_idx]
+        ci_low = ensemble.ci_low[region_id]["population_ratio"][final_year_idx]
+        ci_high = ensemble.ci_high[region_id]["population_ratio"][final_year_idx]
+        
+        means.append(mean)
+        ci_lows.append(mean - ci_low)  # Error bar is distance from mean
+        ci_highs.append(ci_high - mean)
+        colors.append(region.color)
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    x_pos = np.arange(len(regions))
+    
+    # Plot bars with error bars
+    ax.bar(
+        x_pos, means,
+        color=colors,
+        edgecolor='black',
+        alpha=0.8,
+    )
+    
+    ax.errorbar(
+        x_pos, means,
+        yerr=[ci_lows, ci_highs],
+        fmt='none',
+        ecolor='black',
+        capsize=5,
+        capthick=2,
+        alpha=0.7,
+    )
+    
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(regions, rotation=45, ha='right')
+    ax.set_ylabel("Final Population Ratio (mean ± 95% CI)", fontsize=12)
+    ax.set_title(f"Ensemble Final Survival by Region (n={ensemble.n_runs} replicates)", fontsize=14)
+    ax.axhline(y=0.1, color='red', linestyle='--', alpha=0.5, label='10% threshold')
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    plt.tight_layout()
+    save_figure(fig, "10b_ensemble_summary")
+
+
+def print_ensemble_statistics(ensemble: EnsembleResult):
+    """Print ensemble statistics: mean ± std for each region."""
+    print("\n" + "="*70)
+    print(f"ENSEMBLE STATISTICS (n={ensemble.n_runs} replicates)")
+    print("="*70)
+    
+    config = ensemble.config
+    final_year_idx = -1
+    
+    print(f"\n{'Region':<20} {'Mean':<12} {'Std':<12} {'95% CI Range':<20} {'Obs Target':<15}")
+    print("-"*70)
+    
+    for region_id in REGION_ORDER:
+        region = config.regions[region_id]
+        
+        # Get final population ratio across all runs
+        final_pops = np.array([
+            run.get_region_trajectories()[region_id]["population_ratio"][final_year_idx]
+            for run in ensemble.all_runs
+        ])
+        
+        mean = np.mean(final_pops)
+        std = np.std(final_pops)
+        ci_low = np.percentile(final_pops, 2.5)
+        ci_high = np.percentile(final_pops, 97.5)
+        
+        ci_range = f"[{ci_low:.3f}, {ci_high:.3f}]"
+        obs_survival = f"{region.post_sswd_survival:.1%}"
+        
+        print(f"{region.short_name:<20} {mean:>6.3f} ± {std:<5.3f} {ci_range:<20} {obs_survival:<15}")
+    
+    print("-"*70)
+    
+    # Overall statistics
+    all_final_pops = []
+    for run in ensemble.all_runs:
+        traj = run.get_region_trajectories()
+        total = sum(traj[r]["population_ratio"][final_year_idx] for r in REGION_ORDER) / len(REGION_ORDER)
+        all_final_pops.append(total)
+    
+    overall_mean = np.mean(all_final_pops)
+    overall_std = np.std(all_final_pops)
+    overall_ci_low = np.percentile(all_final_pops, 2.5)
+    overall_ci_high = np.percentile(all_final_pops, 97.5)
+    
+    print(f"\n{'OVERALL MEAN':<20} {overall_mean:>6.3f} ± {overall_std:<5.3f} [{overall_ci_low:.3f}, {overall_ci_high:.3f}]")
+    
+    print("\n" + "="*70)
+    print("VARIANCE CHECK")
+    print("="*70)
+    
+    # Show which regions have highest variance
+    variances = []
+    for region_id in REGION_ORDER:
+        final_pops = np.array([
+            run.get_region_trajectories()[region_id]["population_ratio"][final_year_idx]
+            for run in ensemble.all_runs
+        ])
+        cv = np.std(final_pops) / (np.mean(final_pops) + 1e-10)  # Coefficient of variation
+        variances.append((region_id, cv, np.std(final_pops)))
+    
+    variances.sort(key=lambda x: x[2], reverse=True)
+    
+    print(f"\n{'Region':<20} {'Std Dev':<12} {'Coeff. of Var.':<15}")
+    print("-"*50)
+    for region_id, cv, std in variances:
+        region = config.regions[region_id]
+        print(f"{region.short_name:<20} {std:>8.4f}      {cv:>8.2f}")
+
+
 def main():
     """Run Pacific Coast simulation with all visualizations."""
     import argparse
@@ -1206,13 +1484,34 @@ def main():
                        help='Only export JSON, skip visualization plots')
     parser.add_argument('--moss-landing', action='store_true',
                        help='Run Moss Landing outplanting scenarios (2019 vs 2026 broodstock)')
+    parser.add_argument('--ensemble', type=int, nargs='?', const=20, default=0,
+                       help='Run ensemble averaging with N replicates (default: 20)')
     args = parser.parse_args()
     
     print("="*60)
     print("PACIFIC COAST PYCNOPODIA SIMULATION")
     print("="*60)
     
-    # Run main simulation
+    # Check if ensemble mode is requested
+    if args.ensemble > 0:
+        # Run ensemble
+        config = PacificCoastConfig(n_years=100)
+        ensemble = run_ensemble(n_runs=args.ensemble, config=config, verbose=True)
+        
+        # Generate ensemble plots
+        plot_ensemble_trajectories(ensemble)
+        plot_ensemble_summary(ensemble)
+        
+        # Print ensemble statistics
+        print_ensemble_statistics(ensemble)
+        
+        print("\n" + "="*60)
+        print(f"Ensemble figures saved to: {FIGURE_DIR}")
+        print("="*60)
+        
+        return ensemble
+    
+    # Otherwise run single simulation
     print("\n🌊 Running simulation...")
     config = PacificCoastConfig(n_years=100)
     sim = PacificCoastSimulation(config, seed=43)
