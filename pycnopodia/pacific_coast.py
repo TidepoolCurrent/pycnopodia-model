@@ -883,23 +883,43 @@ class PacificCoastSimulation:
                     if self.rng.random() < infection_prob:
                         new_prevalence[i] = 0.80 + self.rng.uniform(0, 0.15)
                 else:
-                    # Decay toward endemic level
-                    # After acute phase, disease drops rapidly
-                    years_since_onset = year - self.config.disease_onset_year
+                    # Density-dependent disease dynamics
+                    # Disease prevalence sustained by host density + transmission
+                    # When hosts crash, disease naturally declines (fewer contacts)
+                    current = self.disease_prevalence[i]
+                    
+                    # Host density relative to carrying capacity
+                    density_ratio = self.populations[i] / max(self.initial_populations[i], 1)
+                    
+                    # Transmission from neighbors (reverberation)
+                    neighbor_pressure = 0.0
+                    for j in range(self.n_sites):
+                        if j != i and self.disease_prevalence[j] > 0.01:
+                            neighbor_pressure += (
+                                self.disease_connectivity[j, i] *
+                                self.disease_prevalence[j] *
+                                0.3  # neighbor contribution weight
+                            )
+                    
+                    # Temperature effect
                     temp_mod = get_temperature_spread_modifier(
                         self.temperatures[i], self.config
                     )
-                    endemic = self.config.disease_endemic_prevalence * temp_mod
-                    current = self.disease_prevalence[i]
                     
-                    if years_since_onset <= self.config.disease_acute_years:
-                        # During acute phase: slow decay (disease raging)
-                        decay_rate = 0.3
-                    else:
-                        # Post-acute: disease subsides rapidly
-                        decay_rate = 0.7
+                    # Equilibrium prevalence emerges from:
+                    # - local host density (more hosts = more transmission)
+                    # - neighbor transmission pressure
+                    # - temperature
+                    # R0 analog: disease sustains when density * temp > threshold
+                    sustained_prevalence = (
+                        density_ratio * temp_mod * 0.4 +  # local density-dependent
+                        neighbor_pressure * 0.3            # neighbor reverberation
+                    )
+                    sustained_prevalence = min(sustained_prevalence, 0.90)
                     
-                    target = endemic + (current - endemic) * (1 - decay_rate)
+                    # Decay toward density-driven equilibrium
+                    decay_rate = 0.5
+                    target = sustained_prevalence + (current - sustained_prevalence) * (1 - decay_rate)
                     new_prevalence[i] = np.clip(
                         target + self.rng.normal(0, 0.01),
                         0.0, 0.95
