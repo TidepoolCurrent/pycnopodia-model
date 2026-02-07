@@ -57,17 +57,20 @@ class NetworkConfig:
     allee_threshold: int = 50  # Below this, fertilization fails
     allee_half_sat: int = 100  # Half-saturation for fertilization
     
-    # Disease - SPREADS THROUGH NETWORK
+    # Disease - SPREADS THROUGH NETWORK (CALIBRATED TO SSWD)
+    # Real SSWD: 90-100% mortality, spread ~3000km in 2 years (Harvell 2019)
     disease_onset_site: int = 500  # Initial outbreak site (middle of network)
     disease_onset_year: int = 10
-    disease_spread_rate: float = 0.3  # Probability of spreading to connected site per year
-    disease_mortality: float = 0.7  # Mortality rate when infected
-    disease_recovery_rate: float = 0.05  # Rate of becoming disease-free
+    disease_spread_rate: float = 0.85  # Rapid wave spread (not gradual seeding)
+    disease_mortality: float = 0.95  # 95% mortality - matches observed 90-100%
+    disease_recovery_rate: float = 0.01  # Disease persists - minimal recovery
+    disease_endemic_prevalence: float = 0.30  # Long-term endemic level
     
     # Genetics - TRACK ALLELES PER SITE
+    # Resistance was RARE before outbreak (if common, we'd see >10% survival)
     n_loci: int = 10  # Resistance loci to track
-    initial_resistance_freq: float = 0.1  # Starting resistance allele frequency
-    resistance_effect: float = 0.5  # Mortality reduction for homozygous resistant
+    initial_resistance_freq: float = 0.02  # Very rare before outbreak
+    resistance_effect: float = 0.35  # Reduces mortality from 95% to ~62% for RR
     
     # Intervention - OUTPLANTING
     outplanting_n: int = 100  # Number of stars per outplanting event
@@ -226,7 +229,7 @@ class NetworkState:
     # Baselines for ratio calculations
     N0_per_site: int = 1000
     N0_total: int = 1_000_000
-    H0: float = 0.18  # Initial He (at p=0.1: 2*0.1*0.9 = 0.18)
+    H0: float = 0.0392  # Initial He (at p=0.02: 2*0.02*0.98 = 0.0392)
     
     @property
     def total_population(self) -> int:
@@ -553,17 +556,16 @@ class NetworkSimulation:
                         new_prevalence[i] = 0.9  # Epidemic hits hard
             else:
                 # Site is infected - high prevalence persists during outbreak
-                # Slowly declines to endemic level after peak
-                years_infected = 1  # Simplified
-                peak_prevalence = 0.95
-                endemic_prevalence = 0.3
+                # Very slow recovery - disease persists (matches observed SSWD dynamics)
+                endemic = self.config.disease_endemic_prevalence
+                recovery = self.config.disease_recovery_rate
                 
-                # Decay toward endemic
-                decay_rate = 0.1
-                target = endemic_prevalence + (peak_prevalence - endemic_prevalence) * np.exp(-decay_rate * years_infected)
+                # Slow decay toward endemic level
+                current = self.disease_prevalence[i]
+                target = endemic + (current - endemic) * (1 - recovery)
                 
-                new_prevalence[i] = target + self.rng.normal(0, 0.05)
-                new_prevalence[i] = np.clip(new_prevalence[i], endemic_prevalence * 0.5, 0.98)
+                new_prevalence[i] = target + self.rng.normal(0, 0.03)
+                new_prevalence[i] = np.clip(new_prevalence[i], endemic * 0.5, 0.98)
         
         self.disease_prevalence = new_prevalence
     
