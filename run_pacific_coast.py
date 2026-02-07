@@ -370,7 +370,10 @@ def plot_population_trajectories_by_region(result: PacificCoastResult):
     save_figure(fig1, "04_population_trajectories")
     
     # --- Separate subplots per region ---
-    fig2, axes = plt.subplots(2, 4, figsize=(16, 10))
+    n_regions = len(REGION_ORDER)
+    ncols = min(4, n_regions)
+    nrows = (n_regions + ncols - 1) // ncols
+    fig2, axes = plt.subplots(nrows, ncols, figsize=(16, 4 * nrows))
     axes = axes.flatten()
     
     for i, region_id in enumerate(REGION_ORDER):
@@ -556,7 +559,10 @@ def plot_resistance_evolution(result: PacificCoastResult):
     save_figure(fig, "06_resistance_evolution")
     
     # --- Detailed: resistance + disease + population overlay ---
-    fig2, axes2 = plt.subplots(2, 4, figsize=(16, 10))
+    n_regions = len(REGION_ORDER)
+    ncols = min(4, n_regions)
+    nrows = (n_regions + ncols - 1) // ncols
+    fig2, axes2 = plt.subplots(nrows, ncols, figsize=(16, 4 * nrows))
     axes2 = axes2.flatten()
     
     for i, region_id in enumerate(REGION_ORDER):
@@ -594,7 +600,8 @@ def plot_regional_summary_dashboard(result: PacificCoastResult):
     years = result.years
     config = result.config
     
-    fig, axes = plt.subplots(3, 8, figsize=(24, 10))
+    n_regions = len(REGION_ORDER)
+    fig, axes = plt.subplots(3, n_regions, figsize=(3 * n_regions, 10))
     
     metrics = ['population_ratio', 'resistance', 'disease_prevalence']
     titles = ['Population Ratio', 'Resistance Freq', 'Disease Prevalence']
@@ -783,7 +790,8 @@ def print_summary_statistics(result: PacificCoastResult):
     
     # Check if results match observed patterns
     checks = [
-        ("SE Alaska ~40% survival", final_summary["se_alaska"]["population_ratio"], 0.3, 0.6),
+        ("SE Alaska North (fjords) ~60% survival", final_summary.get("se_alaska_north", {}).get("population_ratio", 0), 0.3, 0.7),
+        ("SE Alaska South ~10% survival", final_summary.get("se_alaska_south", {}).get("population_ratio", 0), 0.0, 0.20),
         ("BC Fjords ~50% survival (refugia)", final_summary["bc_fjords"]["population_ratio"], 0.3, 0.7),
         ("Salish Sea <5% survival", final_summary["salish_sea"]["population_ratio"], 0.0, 0.10),
         ("S. California ~0% survival", final_summary["s_california"]["population_ratio"], 0.0, 0.05),

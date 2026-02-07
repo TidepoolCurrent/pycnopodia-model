@@ -43,18 +43,31 @@ class RegionConfig:
 
 # Define the 8 Pacific Coast regions
 PACIFIC_COAST_REGIONS = {
-    "se_alaska": RegionConfig(
-        name="Southeast Alaska",
-        short_name="SE AK",
-        latitude_range=(55.0, 60.0),
+    "se_alaska_south": RegionConfig(
+        name="SE Alaska (Southern)",
+        short_name="SE AK S",
+        latitude_range=(55.0, 57.5),
         region_type=RegionType.OUTER_COAST,
-        base_temperature=8.0,  # 7-9°C range
+        base_temperature=8.5,  # Warmer southern range
         temperature_variance=2.0,
         warming_rate=0.2,
         historical_density=0.7,
-        post_sswd_survival=0.40,  # 60% decline
-        n_sites=40,
+        post_sswd_survival=0.10,  # Southern range decimated
+        n_sites=20,
         color='#1f77b4',  # Blue
+    ),
+    "se_alaska_north": RegionConfig(
+        name="SE Alaska (Northern Fjords)",
+        short_name="SE AK N",
+        latitude_range=(57.5, 60.0),
+        region_type=RegionType.FJORD,  # Northern fjords = refugia
+        base_temperature=7.0,  # Coldest region
+        temperature_variance=1.5,
+        warming_rate=0.15,
+        historical_density=0.5,
+        post_sswd_survival=0.60,  # Where survivors retreated
+        n_sites=20,
+        color='#17becf',  # Cyan
     ),
     "bc_outer": RegionConfig(
         name="BC Outer Coast",
@@ -160,7 +173,8 @@ REGION_ORDER = [
     "salish_sea",  # Overlaps with WA/OR latitudinally but is inland
     "bc_outer",
     "bc_fjords",   # Part of BC coast
-    "se_alaska",
+    "se_alaska_south",
+    "se_alaska_north",  # Northern fjords = refugia
 ]
 
 
