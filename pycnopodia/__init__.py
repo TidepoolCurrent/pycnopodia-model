@@ -18,8 +18,16 @@ from .config import Config, DEFAULT_CONFIG
 from .environment import EnvironmentConfig, EnvironmentState
 from .spatial import SpatialConfig, SpatialPopulation
 from .srs import HierarchicalSRSConfig, HierarchicalSRS
+from .size_structured import SizeStructuredConfig, SizeStructuredPopulation
+from .real_data import (
+    HISTORICAL_SST, 
+    get_historical_sst,
+    get_sswd_parameters,
+    generate_temperature_scenario,
+    get_larval_connectivity,
+)
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = [
     "Population", 
     "Simulation", 

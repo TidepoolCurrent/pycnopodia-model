@@ -32,7 +32,9 @@ class Config:
     
     # Sweepstakes reproductive success (Hedgecock & Pudovkin 2011)
     srs_mean: float = 0.08  # Mean fraction of adults breeding per year
-    srs_shape: float = 1.8  # Beta distribution shape (high variance)
+    srs_shape: float = 5.0  # Beta concentration param (higher = less variance)
+    # NOTE: shape=5 with mean=0.08 gives α=0.4, β=4.6, CV≈1.3 (high variance)
+    # For peaked distribution around mean, need shape > 12 (gives α > 1)
     
     # IMPROVEMENT: Allow exploration of more extreme SRS
     srs_min: float = 0.02  # Minimum breeding fraction

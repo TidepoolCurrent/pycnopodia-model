@@ -16,6 +16,11 @@ def sample_breeding_fraction(config: Config, rng: np.random.Generator) -> float:
     Sample the fraction of adults that successfully breed this year.
     
     Uses a Beta distribution to model high variance in reproductive success.
+    Parameterized by mean and concentration (shape) parameter.
+    
+    NOTE: For a peaked (unimodal) distribution, need α > 1 and β > 1.
+    With mean=0.08, this requires shape > 12.5. Lower shape values
+    produce U-shaped distributions (bimodal at 0 and 1).
     
     Parameters
     ----------
@@ -32,10 +37,15 @@ def sample_breeding_fraction(config: Config, rng: np.random.Generator) -> float:
     mean = config.srs_mean
     shape = config.srs_shape
     
-    # Beta distribution parameterized by mean and shape
-    # alpha = shape * mean, beta = shape * (1 - mean)
+    # Beta distribution parameterized by mean and concentration
+    # Higher shape = less variance, more peaked around mean
+    # For mean=0.08, shape=15 gives CV≈0.8, shape=5 gives CV≈1.4
     alpha = shape * mean
     beta = shape * (1 - mean)
+    
+    # Ensure valid parameters (α, β > 0)
+    alpha = max(0.01, alpha)
+    beta = max(0.01, beta)
     
     fraction = rng.beta(alpha, beta)
     
@@ -184,9 +194,11 @@ def calculate_recruitment(
         fert_success = fertilization_success_saturating(n_adults, config.allee_half_saturation)
     
     # Calculate fecundity with resistance cost
-    resistance_scores = population.resistance_scores()[female_indices]
-    fecundity_costs = resistance_scores * config.fecundity_cost_per_allele * config.n_loci * 2
-    effective_fecundity = config.fecundity * (1 - fecundity_costs)
+    # Cost is per resistance ALLELE (not per effect unit)
+    # Count total resistance alleles per female
+    n_resistance_alleles = population.genomes[female_indices].sum(axis=1)
+    fecundity_costs = n_resistance_alleles * config.fecundity_cost_per_allele
+    effective_fecundity = config.fecundity * np.maximum(0, 1 - fecundity_costs)
     
     # Total potential settlers
     eggs_per_female = effective_fecundity * fert_success
@@ -252,30 +264,29 @@ def generate_offspring(
     mother_genomes = population.genomes[mother_idx]
     father_genomes = population.genomes[father_idx]
     
-    # Mendelian segregation at each locus
-    offspring_genomes = np.zeros((n_offspring, n_loci), dtype=np.uint8)
+    # Mendelian segregation - fully vectorized
+    # For each parent genotype:
+    #   0 -> always transmit 0
+    #   1 -> 50% chance of 0 or 1  
+    #   2 -> always transmit 1
     
-    for locus in range(n_loci):
-        # Sample one allele from each parent
-        # Genotype 0 -> always give 0
-        # Genotype 1 -> 50% chance of 0 or 1
-        # Genotype 2 -> always give 1
-        
-        # Maternal allele
-        mat_geno = mother_genomes[:, locus]
-        mat_allele = np.where(
-            mat_geno == 0, 0,
-            np.where(mat_geno == 2, 1, rng.integers(0, 2, n_offspring))
-        )
-        
-        # Paternal allele
-        pat_geno = father_genomes[:, locus]
-        pat_allele = np.where(
-            pat_geno == 0, 0,
-            np.where(pat_geno == 2, 1, rng.integers(0, 2, n_offspring))
-        )
-        
-        offspring_genomes[:, locus] = mat_allele + pat_allele
+    # Generate random draws for heterozygotes only (more efficient)
+    rand_mat = rng.random((n_offspring, n_loci))
+    rand_pat = rng.random((n_offspring, n_loci))
+    
+    # Maternal alleles: 0 if geno=0, 1 if geno=2, random if geno=1
+    mat_allele = np.where(
+        mother_genomes == 0, 0,
+        np.where(mother_genomes == 2, 1, (rand_mat < 0.5).astype(np.uint8))
+    )
+    
+    # Paternal alleles
+    pat_allele = np.where(
+        father_genomes == 0, 0,
+        np.where(father_genomes == 2, 1, (rand_pat < 0.5).astype(np.uint8))
+    )
+    
+    offspring_genomes = mat_allele + pat_allele
     
     # All newborns are age 0
     ages = np.zeros(n_offspring, dtype=np.int8)
