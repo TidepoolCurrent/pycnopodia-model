@@ -296,11 +296,13 @@ def build_sites(config: PacificCoastConfig, rng: np.random.Generator = None) -> 
             # Refugia probability depends on region type
             # Fjords: many deep-water refugia; Alaska: some; outer coast: rare
             if region.region_type == RegionType.FJORD:
-                refugia_prob = 0.60  # Many deep-water refugia in fjords
-            elif region.short_name == "SE AK":
-                refugia_prob = 0.20  # Deep-water refugia in Alaska
+                refugia_prob = 0.70  # Many deep-water refugia in fjords
+            elif region.short_name == "SE AK N":
+                refugia_prob = 0.25  # Northern fjord refugia
+            elif region.short_name == "SE AK S":
+                refugia_prob = 0.15  # Some deep-water refugia
             elif region.region_type == RegionType.INLAND_SEA:
-                refugia_prob = 0.05  # Rare in inland seas
+                refugia_prob = 0.06  # Rare in inland seas
             else:
                 refugia_prob = 0.03  # Very rare on outer coast
             is_refugia = rng.random() < refugia_prob
@@ -359,7 +361,7 @@ def get_temperature_disease_modifier(temperature: float, config: PacificCoastCon
     # Warm water INCREASES lethality
     temp_diff = temperature - config.disease_temp_threshold
     modifier = 1.0 + config.disease_temp_coefficient * temp_diff
-    return max(0.7, min(modifier, 2.0))  # Range: 0.7x to 2.0x
+    return max(0.5, min(modifier, 2.0))  # Range: 0.5x to 2.0x (cold water protective)
 
 
 def get_temperature_spread_modifier(temperature: float, config: PacificCoastConfig) -> float:
