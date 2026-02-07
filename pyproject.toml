@@ -1,0 +1,17 @@
+[project]
+name = "pycnopodia-model"
+version = "0.1.0"
+description = "Individual-based population model for Pycnopodia helianthoides"
+authors = [{name = "TidepoolCurrent"}, {name = "Weertman"}]
+requires-python = ">=3.9"
+dependencies = ["numpy"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+viz = ["matplotlib"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[project.scripts]
+pycnopodia = "run_simulation:main"
