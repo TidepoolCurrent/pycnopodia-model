@@ -861,21 +861,22 @@ class PacificCoastSimulation:
                                 temp_mod
                             )
                     
-                    # Within-region rapid spread: if ANY site in same region
-                    # is already infected, disease spreads fast locally
-                    region_id = self.sites[i].region_id
-                    r_start, r_end = self.region_boundaries[region_id]
+                    # Within-region rapid spread on CONNECTED coast
+                    # Fjords are isolated — disease doesn't spread fast between fjord sites
+                    site_region = self.sites[i].region_id
+                    region_cfg = self.config.regions[site_region]
+                    r_start, r_end = self.region_boundaries[site_region]
                     region_infected = any(
                         self.disease_prevalence[j] > 0.1 
                         for j in range(r_start, r_end) if j != i
                     )
                     
-                    if region_infected:
-                        # Within-region spread is very fast (SSWD spread 
-                        # through entire regions in months, not years)
-                        infection_prob = 0.90  # Near-certain within 1 year
+                    if region_infected and region_cfg.region_type != RegionType.FJORD:
+                        # Open coast: disease spreads fast within region
+                        infection_prob = 0.90
                     else:
-                        # Between-region spread via connectivity matrix
+                        # Fjords or between-region: use connectivity matrix
+                        # Boost the base transmission for coastal adjacency
                         infection_prob = 1.0 - np.exp(-transmission_pressure * 15.0)
                     
                     if self.rng.random() < infection_prob:
