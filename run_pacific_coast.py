@@ -363,8 +363,10 @@ def plot_population_trajectories_by_region(result: PacificCoastResult):
     ax.set_ylabel("Population Ratio (relative to initial)", fontsize=12)
     ax.set_title("Population Trajectories by Region", fontsize=14)
     ax.legend(loc='upper right', fontsize=9)
-    ax.set_ylim(0, 1.5)
-    ax.grid(True, alpha=0.3)
+    ax.set_yscale('log')
+    ax.set_ylim(1e-4, 2.0)
+    ax.axhline(y=1.0, color='gray', linestyle='--', alpha=0.3)
+    ax.grid(True, alpha=0.3, which='both')
     
     plt.tight_layout()
     save_figure(fig1, "04_population_trajectories")
@@ -391,7 +393,8 @@ def plot_population_trajectories_by_region(result: PacificCoastResult):
         ax.set_title(f"{region.name}\n(Observed survival: {region.post_sswd_survival:.0%})", fontsize=10)
         ax.set_xlabel("Year", fontsize=9)
         ax.set_ylabel("Ratio", fontsize=9)
-        ax.set_ylim(0, 1.2)
+        ax.set_yscale('log')
+        ax.set_ylim(1e-4, 2.0)
         ax.grid(True, alpha=0.3)
         
         if i == 0:
