@@ -244,7 +244,7 @@ class PacificCoastConfig:
     fjord_pocket_fraction: float = 0.05  # Small fraction of fjord sites in isolated pockets
     fjord_pocket_size: int = 2  # Sites per pocket (individual fjord arms)
     fjord_disease_cross_pocket: float = 0.01  # Near-zero disease transmission between pockets
-    fjord_larval_self_recruitment: float = 0.85  # High retention within pocket
+    fjord_larval_self_recruitment: float = 0.95  # Very high retention within pocket
     
     # Genetics
     n_loci: int = 10
@@ -474,14 +474,27 @@ def build_larval_connectivity_matrix(
             # Distance in site indices (proxy for geographic distance)
             dist = abs(j - i)
             
-            # Same site - self-recruitment (much higher in fjords)
+            # Same site - self-recruitment
             if i == j:
-                if source_region.region_type == RegionType.FJORD:
-                    C[i, j] = 0.92  # Fjords trap larvae — semi-enclosed, high retention
+                if source.subnetwork_id >= 0:
+                    C[i, j] = config.fjord_larval_self_recruitment  # Pocket: very high retention
+                elif source_region.region_type == RegionType.FJORD:
+                    C[i, j] = 0.70  # Non-pocket fjord sites: moderate retention
                 elif source_region.region_type == RegionType.INLAND_SEA:
                     C[i, j] = 0.50  # Inland seas retain more than open coast
                 else:
                     C[i, j] = 0.15  # Open coast - most larvae disperse
+                continue
+            
+            # Same subnetwork pocket: high internal connectivity
+            if source.subnetwork_id >= 0 and source.subnetwork_id == target.subnetwork_id:
+                C[i, j] = (1 - config.fjord_larval_self_recruitment) * 0.8  # Most non-self goes to pocket neighbor
+                continue
+            
+            # From pocket to coast: small export (this enables recovery!)
+            if source.subnetwork_id >= 0 and target.subnetwork_id < 0:
+                weight = np.exp(-dist / (config.larval_dispersal_scale * 0.3))
+                C[i, j] = weight * 0.05  # Small but nonzero larval export
                 continue
             
             # Same region - high connectivity
@@ -1014,8 +1027,9 @@ class PacificCoastSimulation:
                     )
                     
                     # Below critical density: disease can't sustain (too few hosts)
-                    if density_ratio < 0.02:
-                        new_prevalence[i] = max(0, current * 0.3)  # Rapid die-off
+                    # Pathogen needs minimum host density for transmission chain
+                    if density_ratio < 0.10:
+                        new_prevalence[i] = 0.0  # Disease dies out — too few hosts
                         continue
                     
                     # Equilibrium prevalence emerges from density + neighbors + temp
@@ -1026,7 +1040,7 @@ class PacificCoastSimulation:
                     sustained_prevalence = min(sustained_prevalence, 0.90)
                     
                     # Fast decay toward density-driven equilibrium post-acute
-                    decay_rate = 0.5
+                    decay_rate = 0.7  # Quick convergence to density-driven level
                     target = sustained_prevalence + (current - sustained_prevalence) * (1 - decay_rate)
                     new_prevalence[i] = np.clip(
                         target + self.rng.normal(0, 0.01),
