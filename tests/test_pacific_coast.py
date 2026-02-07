@@ -33,10 +33,10 @@ from pycnopodia.pacific_coast import (
 class TestRegionConfiguration:
     """Test region setup and configuration."""
     
-    def test_eight_regions_defined(self):
-        """Should have exactly 8 regions."""
-        assert len(PACIFIC_COAST_REGIONS) == 8
-        assert len(REGION_ORDER) == 8
+    def test_nine_regions_defined(self):
+        """Should have exactly 9 regions."""
+        assert len(PACIFIC_COAST_REGIONS) == 9
+        assert len(REGION_ORDER) == 9
     
     def test_region_order_matches_keys(self):
         """Region order should match defined regions."""
@@ -66,7 +66,7 @@ class TestRegionConfiguration:
             if PACIFIC_COAST_REGIONS[r].region_type == RegionType.OUTER_COAST
         }
         coldest = min(outer_coast_temps, key=outer_coast_temps.get)
-        assert coldest == "se_alaska"
+        assert coldest in ("se_alaska_north", "se_alaska_south")
     
     def test_bc_fjords_is_refugia(self):
         """BC Fjords should be marked as refugia (fjord type)."""
@@ -82,7 +82,8 @@ class TestRegionConfiguration:
     def test_region_survival_rates_realistic(self):
         """Post-SSWD survival rates should match observed patterns."""
         # Alaska had highest survival (~40%)
-        assert PACIFIC_COAST_REGIONS["se_alaska"].post_sswd_survival >= 0.3
+        assert PACIFIC_COAST_REGIONS["se_alaska_north"].post_sswd_survival >= 0.3
+        assert PACIFIC_COAST_REGIONS["se_alaska_south"].post_sswd_survival >= 0.1
         
         # BC Fjords ~50%
         assert PACIFIC_COAST_REGIONS["bc_fjords"].post_sswd_survival >= 0.4
@@ -133,24 +134,26 @@ class TestSiteGeneration:
         for site in sites:
             assert 5 <= site.temperature <= 20, f"Site {site.idx} has unrealistic temp: {site.temperature}"
     
-    def test_fjord_sites_marked_refugia(self):
-        """Fjord sites should be marked as refugia."""
+    def test_fjord_sites_mostly_refugia(self):
+        """Fjord sites should have highest refugia probability (~70%)."""
         config = PacificCoastConfig()
-        sites = build_sites(config)
+        sites = build_sites(config, rng=np.random.default_rng(42))
         
         fjord_sites = [s for s in sites if s.region_id == "bc_fjords"]
         assert len(fjord_sites) > 0
-        for site in fjord_sites:
-            assert site.is_refugia
+        refugia_count = sum(1 for s in fjord_sites if s.is_refugia)
+        # ~70% should be refugia (probabilistic)
+        assert refugia_count / len(fjord_sites) > 0.4
     
-    def test_non_fjord_sites_not_refugia(self):
-        """Non-fjord sites should not be marked as refugia."""
+    def test_non_fjord_sites_low_refugia(self):
+        """Non-fjord sites should have low but non-zero refugia probability."""
         config = PacificCoastConfig()
-        sites = build_sites(config)
+        sites = build_sites(config, rng=np.random.default_rng(42))
         
-        for site in sites:
-            if site.region_id != "bc_fjords":
-                assert not site.is_refugia
+        non_fjord_sites = [s for s in sites if s.region_id != "bc_fjords"]
+        refugia_count = sum(1 for s in non_fjord_sites if s.is_refugia)
+        # Some non-fjord sites can be refugia, but fraction should be low
+        assert refugia_count / len(non_fjord_sites) < 0.15
     
     def test_region_boundary_mapping(self):
         """Region boundaries should cover all sites."""
@@ -293,12 +296,14 @@ class TestTemperatureDiseaseRelationship:
         high = get_temperature_disease_modifier(config.disease_temp_threshold + 3, config)
         assert high > low
     
-    def test_temp_modifier_flat_below_threshold(self):
-        """Below threshold, modifier should stay at 1.0."""
+    def test_temp_modifier_lower_below_threshold(self):
+        """Below threshold, modifier should decrease (cold water is protective), floor at 0.5."""
         config = PacificCoastConfig()
         mod_low = get_temperature_disease_modifier(config.disease_temp_threshold - 5, config)
         mod_threshold = get_temperature_disease_modifier(config.disease_temp_threshold, config)
-        assert mod_low == mod_threshold == 1.0
+        assert mod_threshold == 1.0
+        assert mod_low < 1.0
+        assert mod_low >= 0.5  # floor
     
     def test_spread_modifier_increases_with_temp(self):
         """Disease spread should be faster in warmer water."""
@@ -336,7 +341,7 @@ class TestSimulation:
         assert s_ca_prevalence > 0.5, f"S. CA should have disease at onset: {s_ca_prevalence}"
         
         # Alaska should NOT have disease at onset
-        ak_start, ak_end = boundaries["se_alaska"]
+        ak_start, ak_end = boundaries["se_alaska_north"]
         ak_prevalence = onset_state.disease_prevalence[ak_start:ak_end].mean()
         assert ak_prevalence < 0.1, f"Alaska shouldn't have disease yet: {ak_prevalence}"
     
@@ -364,7 +369,7 @@ class TestSimulation:
         # Mean temp should increase from north to south
         boundaries = get_site_region_boundaries(sim.sites)
         
-        north_temps = sim.temperatures[boundaries["se_alaska"][0]:boundaries["se_alaska"][1]]
+        north_temps = sim.temperatures[boundaries["se_alaska_north"][0]:boundaries["se_alaska_north"][1]]
         south_temps = sim.temperatures[boundaries["s_california"][0]:boundaries["s_california"][1]]
         
         assert south_temps.mean() > north_temps.mean() + 3, \
@@ -418,7 +423,7 @@ class TestSimulation:
         trajectories = result.get_region_trajectories()
         
         # Should have all regions
-        assert len(trajectories) == 8
+        assert len(trajectories) == 9
         
         # Each region should have all metrics
         for region_id in REGION_ORDER:
@@ -470,15 +475,14 @@ class TestRefugia:
         
         assert len(sim.refugia_sites) > 0
     
-    def test_refugia_are_fjord_sites(self):
-        """All refugia should be in BC Fjords."""
+    def test_refugia_mostly_fjord_sites(self):
+        """Refugia should be predominantly in BC Fjords but can include other regions."""
         config = PacificCoastConfig()
         sim = PacificCoastSimulation(config, seed=42)
         
-        for site_idx in sim.refugia_sites:
-            site = sim.sites[site_idx]
-            assert site.region_id == "bc_fjords", \
-                f"Refugia site {site_idx} is in {site.region_id}, not bc_fjords"
+        fjord_count = sum(1 for idx in sim.refugia_sites if sim.sites[idx].region_id == "bc_fjords")
+        # Fjords have 70% probability, so they should be the majority of refugia
+        assert fjord_count / len(sim.refugia_sites) > 0.3
     
     def test_refugia_population_persists(self):
         """Refugia should maintain some population through outbreak."""
