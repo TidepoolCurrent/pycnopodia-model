@@ -52,7 +52,7 @@ PACIFIC_COAST_REGIONS = {
         temperature_variance=2.0,
         warming_rate=0.2,
         historical_density=0.7,
-        post_sswd_survival=0.10,  # Southern range decimated
+        post_sswd_survival=0.02,  # Southern range nearly extinct (updated to match Hamilton)
         n_sites=20,
         color='#1f77b4',  # Blue
     ),
@@ -65,7 +65,7 @@ PACIFIC_COAST_REGIONS = {
         temperature_variance=1.5,
         warming_rate=0.15,
         historical_density=0.5,
-        post_sswd_survival=0.60,  # Where survivors retreated
+        post_sswd_survival=0.06,  # Updated to match Hamilton 96% decline (~4% remaining)
         n_sites=20,
         color='#17becf',  # Cyan
     ),
@@ -78,7 +78,7 @@ PACIFIC_COAST_REGIONS = {
         temperature_variance=2.5,
         warming_rate=0.3,
         historical_density=0.8,
-        post_sswd_survival=0.20,  # 80% decline
+        post_sswd_survival=0.10,  # 90% decline (updated to match Hamilton ~87.9%)
         n_sites=50,
         color='#2ca02c',  # Green
     ),
@@ -91,7 +91,7 @@ PACIFIC_COAST_REGIONS = {
         temperature_variance=1.5,
         warming_rate=0.2,
         historical_density=0.5,
-        post_sswd_survival=0.50,  # ~50% survival - REFUGIA
+        post_sswd_survival=0.18,  # Reduced from 0.50 - fjords delay but don't prevent
         n_sites=25,
         color='#17becf',  # Cyan
     ),
@@ -209,8 +209,8 @@ class PacificCoastConfig:
     # Disease spread parameters  
     # Tuned to produce ~90% range-wide decline with temperature-dependent mortality
     # Alaska (cold) keeps ~40%, BC Fjords (refugia) ~50%, south ~0%
-    disease_base_mortality: float = 0.85  # Base per-year mortality at threshold temp (acute phase)
-    disease_transmission_rate: float = 1.20  # Fast coastal spread
+    disease_base_mortality: float = 0.90  # Base per-year mortality at threshold temp
+    disease_transmission_rate: float = 1.50  # Fast coastal spread (SSWD covered coast in ~2yr)
     disease_endemic_prevalence: float = 0.03  # Low background after acute phase
     disease_acute_years: int = 3  # Acute outbreak lasts ~3 years
     
@@ -248,7 +248,7 @@ class PacificCoastConfig:
     survival_adult: float = 0.95
     survival_juvenile: float = 0.60
     maturation_years: int = 3
-    carrying_capacity_multiplier: float = 5.0  # K relative to initial pop
+    carrying_capacity_multiplier: float = 1.2  # K relative to initial pop (near equilibrium pre-SSWD)
     recruitment_ratio: float = 0.35  # Must offset 5% adult mortality + juvenile loss
     breeding_success_ratio: float = 0.08
     allee_threshold: int = 50
@@ -295,17 +295,18 @@ def build_sites(config: PacificCoastConfig, rng: np.random.Generator = None) -> 
             pop = region.historical_density * rng.uniform(0.7, 1.3)
             
             # Refugia probability depends on region type
-            # Fjords: many deep-water refugia; Alaska: some; outer coast: rare
+            # Fjords: some deep-water refugia but disease eventually penetrates
+            # Reduced from 0.70 to match observed declines in SE Alaska
             if region.region_type == RegionType.FJORD:
-                refugia_prob = 0.70  # Many deep-water refugia in fjords
+                refugia_prob = 0.08  # Only deepest fjords provide true refugia
             elif region.short_name == "SE AK N":
-                refugia_prob = 0.35  # Northern fjord refugia
+                refugia_prob = 0.06  # Very few true refugia even in deep fjords
             elif region.short_name == "SE AK S":
-                refugia_prob = 0.15  # Some deep-water refugia
+                refugia_prob = 0.10  # Some deep-water refugia (reduced from 0.15)
             elif region.region_type == RegionType.INLAND_SEA:
-                refugia_prob = 0.06  # Rare in inland seas
+                refugia_prob = 0.05  # Rare in inland seas
             else:
-                refugia_prob = 0.03  # Very rare on outer coast
+                refugia_prob = 0.02  # Very rare on outer coast
             is_refugia = rng.random() < refugia_prob
             
             sites.append(Site(
@@ -362,7 +363,7 @@ def get_temperature_disease_modifier(temperature: float, config: PacificCoastCon
     # Warm water INCREASES lethality
     temp_diff = temperature - config.disease_temp_threshold
     modifier = 1.0 + config.disease_temp_coefficient * temp_diff
-    return max(0.5, min(modifier, 2.0))  # Range: 0.5x to 2.0x (cold water protective)
+    return max(0.90, min(modifier, 1.5))  # Range: 0.9x to 1.5x (SSWD lethal at all temps)
 
 
 def get_temperature_spread_modifier(temperature: float, config: PacificCoastConfig) -> float:
@@ -373,11 +374,12 @@ def get_temperature_spread_modifier(temperature: float, config: PacificCoastConf
     
     Returns modifier in [0.5, 1.5] range.
     """
-    # Cold water dramatically slows spread
-    # Center around 12°C; below 9°C disease spreads very slowly
-    temp_deviation = (temperature - 12.0) / 4.0  # Steeper scaling
-    modifier = 1.0 + 0.6 * temp_deviation
-    return np.clip(modifier, 0.2, 1.8)  # Cold = 0.2x, warm = 1.8x
+    # Cold water slows spread but doesn't prevent it
+    # SSWD reached SE Alaska within ~1 year of first detection
+    # Center around 12°C; cold slows but disease still spreads
+    temp_deviation = (temperature - 12.0) / 5.0  # Gentler scaling
+    modifier = 1.0 + 0.4 * temp_deviation
+    return np.clip(modifier, 0.7, 1.5)  # Cold = 0.7x, warm = 1.5x
 
 
 def build_larval_connectivity_matrix(
@@ -842,9 +844,27 @@ class PacificCoastSimulation:
                     new_prevalence[i] = 0.90 + self.rng.uniform(0, 0.08)
         else:
             # Spread through disease connectivity matrix
+            # Refugia sites: protected during acute phase, then gradually penetrable
+            acute_phase_years = self.config.disease_acute_years  # 3 years
+            is_acute = years_since_onset <= acute_phase_years
+            
             for i in range(self.n_sites):
+                # Refugia protection: strong during acute phase, weakens over time
                 if i in self.refugia_sites:
-                    continue  # Refugia stay disease-free
+                    if is_acute:
+                        # During acute phase: refugia stay disease-free
+                        continue
+                    else:
+                        # After acute phase: disease can gradually penetrate fjords
+                        # Penetration increases over time but never reaches 100%
+                        years_post_acute = years_since_onset - acute_phase_years
+                        # Penetration factor: 0 at year 3, reaches ~0.50 by year 8
+                        # Disease eventually finds fjord populations  
+                        penetration_factor = min(0.50, years_post_acute * 0.10)
+                        
+                        # Only process if random check passes (gradual infection)
+                        if self.rng.random() > penetration_factor:
+                            continue
                 
                 if self.disease_prevalence[i] < 0.1:
                     # Compute transmission pressure from infected sites
@@ -875,9 +895,11 @@ class PacificCoastSimulation:
                     if region_infected and region_cfg.region_type != RegionType.FJORD:
                         # Open coast: disease spreads fast within region
                         infection_prob = 0.90
+                    elif region_infected and region_cfg.region_type == RegionType.FJORD:
+                        # Fjords: disease spreads within but slower than open coast
+                        infection_prob = 0.60
                     else:
-                        # Fjords or between-region: use connectivity matrix
-                        # Boost the base transmission for coastal adjacency
+                        # Between-region: use connectivity matrix
                         infection_prob = 1.0 - np.exp(-transmission_pressure * 15.0)
                     
                     if self.rng.random() < infection_prob:
