@@ -44,10 +44,10 @@ class SuperIndConfig:
     survival_juvenile_annual: float = 0.60
     
     # Reproduction (winter only)
-    fecundity: float = 0.35  # Fraction of adults producing recruits
+    fecundity: float = 600.0  # Settled recruits per breeding pair (SRS = 1/1000, broadcast spawner)
     allee_threshold: int = 50  # Minimum adults for successful spawning (in real individuals)
     allee_half_sat: int = 150
-    srs_breeding_fraction: float = 0.08  # Only 8% of adults breed (sweepstakes)
+    srs_breeding_fraction: float = 0.001  # ~1/1000 adults breed (broadcast spawner SRS)
     
     # Disease
     disease_onset_year: int = 10
@@ -515,14 +515,24 @@ class SuperIndSimulation:
             fertilization = n_real_adults**2 / (n_real_adults**2 + h**2)
             
             # SRS: only a fraction breed
-            n_breeders = max(2, int(len(adults) * self.config.srs_breeding_fraction))
-            breeders = list(self.rng.choice(adults, size=min(n_breeders, len(adults)), replace=False))
+            # SRS operates at REAL individual level, not super-individual level
+            n_real_adults = len(adults) * gs
+            n_real_breeders = int(n_real_adults * self.config.srs_breeding_fraction)
+            if n_real_breeders < 2:
+                continue  # Need at least 2 for sexual reproduction
             
-            # Number of offspring (super-individuals)
-            n_offspring = int(
-                len(adults) * self.config.fecundity * fertilization *
+            # Select which super-individuals contribute genes (proportional to real breeders)
+            # Each super-individual has gs/N_real_breeders-proportional chance of being a breeder parent
+            n_parent_inds = min(max(2, int(n_real_breeders / gs * 2)), len(adults))
+            breeders = list(self.rng.choice(adults, size=n_parent_inds, replace=False))
+            
+            # Number of offspring super-individuals
+            # Total real recruits = n_real_breeders/2 pairs × fecundity per pair × fertilization
+            n_real_recruits = int(
+                (n_real_breeders / 2) * self.config.fecundity * fertilization *
                 self.rng.beta(2, 20) / 0.091
             )
+            n_offspring = max(0, n_real_recruits // gs)
             
             offspring_genotypes = []
             for _ in range(n_offspring):
