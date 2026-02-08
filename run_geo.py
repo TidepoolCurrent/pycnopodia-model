@@ -66,8 +66,8 @@ def get_region_trajectories(result, sites):
 
 def plot_ensemble_trajectories(results, sites, outdir):
     """Plot ensemble trajectories with confidence bands."""
-    n_years = len(results[0].states)
-    years = np.arange(n_years)
+    n_steps = len(results[0].states)
+    years = np.arange(n_steps) / 4 + 2003  # Convert steps to calendar years
     
     # Collect trajectories per region
     region_trajs = {r: [] for r in REGION_ORDER}
@@ -100,7 +100,8 @@ def plot_ensemble_trajectories(results, sites, outdir):
     
     ax.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5, label='Baseline')
     ax.axhline(y=0.1, color='gray', linestyle=':', alpha=0.5, label='10% threshold')
-    ax.axvline(x=10, color='red', linestyle=':', alpha=0.3, label='Disease onset')
+    ax.axvline(x=2013, color='red', linestyle=':', alpha=0.3, label='SSWD onset (2013)')
+    ax.axvline(x=2020, color='orange', linestyle=':', alpha=0.3, label='Hamilton survey (2020)')
     
     ax.set_xlabel('Year', fontsize=12)
     ax.set_ylabel('Population Ratio (relative to initial)', fontsize=12)
@@ -123,8 +124,9 @@ def plot_fjord_details(results, sites, outdir):
     if not fjord_sites:
         return
     
-    n_years = len(results[0].states)
-    years = np.arange(n_years)
+    n_steps = len(results[0].states)
+    n_years = n_steps  # compat alias
+    years = np.arange(n_steps) / 4 + 2003
     
     fig, axes = plt.subplots(2, 1, figsize=(14, 10))
     
@@ -146,7 +148,7 @@ def plot_fjord_details(results, sites, outdir):
     
     ax.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5)
     ax.axhline(y=0.1, color='gray', linestyle=':', alpha=0.5)
-    ax.axvline(x=10, color='red', linestyle=':', alpha=0.3)
+    ax.axvline(x=2013, color="red", linestyle=':', alpha=0.3)
     ax.set_ylabel('Population Ratio')
     ax.set_title(f'Shallow-Sill Fjord Sites (n={len(results)} ensemble)', fontsize=13)
     ax.legend(fontsize=7, loc='lower right', ncol=2)
@@ -165,7 +167,7 @@ def plot_fjord_details(results, sites, outdir):
         
         ax.plot(years, mean, linewidth=1.5, label=f"{site.name}")
     
-    ax.axvline(x=10, color='red', linestyle=':', alpha=0.3)
+    ax.axvline(x=2013, color="red", linestyle=':', alpha=0.3)
     ax.set_xlabel('Year')
     ax.set_ylabel('Mean Resistance Allele Frequency')
     ax.set_title('Resistance Evolution in Fjord Refugia', fontsize=13)
