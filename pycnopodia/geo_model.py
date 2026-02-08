@@ -627,6 +627,8 @@ class GeoSimulation:
                 arrival_delay += 2.0
                 if site.has_freshwater_lens:
                     arrival_delay += 1.0
+            elif site.site_type == "inland_sea":
+                arrival_delay += 1.0  # Semi-enclosed: disease arrives ~1 season later
             
             if seasons_since_onset - arrival_delay < 0:
                 continue  # Not yet reached
@@ -642,6 +644,8 @@ class GeoSimulation:
             
             if site.has_freshwater_lens:
                 seed_inf *= 0.6
+            if site.site_type == "inland_sea":
+                seed_inf *= 0.75  # Semi-enclosed: lower initial infection
             
             # Ramp over first 2 seasons
             elapsed = seasons_since_onset - arrival_delay
@@ -693,13 +697,20 @@ class GeoSimulation:
                         temp_mod * seasonal_factor
                     )
             
-            # Fjord protection: sill blocks environmental pathogen import
+            # Geographic protection from environmental pathogen
+            # Fjord with sill: blocks >95% of waterborne pathogen
             if is_fjord and has_sill:
-                env_transmission *= 0.05  # Sill blocks >95% of waterborne pathogen
-                neighbor_pressure *= 0.10  # Sill blocks neighbor transmission
+                env_transmission *= 0.05
+                neighbor_pressure *= 0.10
+            # Semi-enclosed seas (Salish Sea, inland waters): partial protection
+            # Juan de Fuca Strait limits exchange; not as good as a sill but better than open coast
+            elif site.site_type == "inland_sea":
+                env_transmission *= 0.30  # 70% reduction from semi-enclosure
+                local_transmission *= 0.70  # Lower density of infected water
+                neighbor_pressure *= 0.40
             if has_lens:
                 env_transmission *= (1 - self.config.freshwater_lens_disease_reduction)
-                local_transmission *= 0.85  # Stars in deeper cold water, less contact
+                local_transmission *= 0.85
             
             # Resistance reduces susceptibility
             resistance = site_resistance[i]
@@ -719,6 +730,8 @@ class GeoSimulation:
                 recovery *= 4.0  # Protected fjords: much higher clearance
                 if has_lens:
                     recovery *= 2.0  # Freshwater lens + cold = best clearance
+            elif site.site_type == "inland_sea":
+                recovery *= 1.8  # Semi-enclosed: moderate clearance advantage
             
             # ── Waning immunity: recovered → susceptible ──
             # SSWD doesn't confer durable immunity — survivors get reinfected
@@ -749,6 +762,8 @@ class GeoSimulation:
                 decay = 0.3  # Reservoir clears in ~2 seasons (vs years on open coast)
             elif is_fjord:
                 decay *= 0.7
+            elif site.site_type == "inland_sea":
+                decay *= 0.8  # Semi-enclosed: moderate reservoir reduction
             if has_lens:
                 decay *= 0.7  # Freshwater dilutes pathogen
             
