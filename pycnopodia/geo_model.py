@@ -75,6 +75,7 @@ class GeoConfig:
     freshwater_lens_mortality_reduction: float = 0.3  # 30% less mortality (pushed to cold water)
     
     # Genetics
+    srs_breeding_fraction: float = 0.001  # Sweepstakes: ~1/1000 adults breed successfully
     n_loci: int = 50
     initial_resistance_freq: float = 0.02
     max_resistance_freq: float = 0.95
@@ -860,15 +861,46 @@ class GeoSimulation:
         np.clip(self.resistance_freqs, 0.001, self.config.max_resistance_freq, out=self.resistance_freqs)
     
     def _apply_drift(self):
-        """Genetic drift in small populations."""
+        """
+        Wright-Fisher genetic drift scaled by effective population size.
+        
+        Ne = N × SRS_fraction (sweepstakes reproductive success).
+        For sunflower stars, SRS ≈ 1/1000, so Ne ≈ 0.001 × N.
+        
+        Drift variance per generation: p(1-p)/(2*Ne)
+        We apply per season (1/4 generation), so scale by sqrt(0.25).
+        
+        Also applies inbreeding depression when Ne < 50.
+        """
+        srs = self.config.srs_breeding_fraction
+        
         for i in range(self.n_sites):
-            if 0 < self.populations[i] < 500:
-                drift_strength = 0.01 * (500 / max(self.populations[i], 1))
-                for l in range(self.config.n_loci):
-                    self.resistance_freqs[i, l] += self.rng.normal(0, drift_strength)
+            if self.populations[i] <= 0:
+                continue
+            
+            # Effective population size
+            Ne = max(1, self.populations[i] * srs)
+            
+            for l in range(self.config.n_loci):
+                p = self.resistance_freqs[i, l]
+                # Wright-Fisher drift: variance = p(1-p)/(2*Ne), per season
+                drift_var = p * (1 - p) / (2 * Ne) * 0.25  # quarterly
+                if drift_var > 0:
+                    drift = self.rng.normal(0, math.sqrt(drift_var))
                     self.resistance_freqs[i, l] = np.clip(
-                        self.resistance_freqs[i, l], 0.001, self.config.max_resistance_freq
+                        p + drift, 0.001, self.config.max_resistance_freq
                     )
+            
+            # Inbreeding depression: when Ne < 50, reduce survival
+            if Ne < 50 and Ne > 0:
+                # Inbreeding coefficient F ≈ 1/(2*Ne) per generation
+                F = min(1.0 / (2 * Ne), 0.5)
+                # Fitness reduction: W = 1 - B*F (B = inbreeding load, typically 5-10)
+                inbreeding_load = 6.0  # Moderate for marine invertebrates
+                fitness = max(0.5, 1.0 - inbreeding_load * F)
+                self.populations[i] *= fitness
+                self.adults[i] *= fitness
+                self.juveniles[i] *= fitness
 
 
 def run_geo_ensemble(n_runs: int = 10, config: GeoConfig = None) -> List[GeoResult]:
