@@ -39,7 +39,7 @@ const REGION_NAMES = {
 // Load data and initialize
 d3.json('data.json').then(loadedData => {
     data = loadedData;
-    console.log('Geo model loaded:', data.n_sites, 'sites,', data.n_years, 'years');
+    console.log('Geo model loaded:', data.n_sites, 'sites,', (data.total_steps || data.n_years), 'years');
     initMap();
     initVisualization();
     setupControls();
@@ -161,10 +161,10 @@ function buildPopupContent(site, i) {
 }
 
 function updateVisualization(yearIndex) {
-    currentYearIndex = Math.max(0, Math.min(yearIndex, data.n_years - 1));
+    currentYearIndex = Math.max(0, Math.min(yearIndex, (data.total_steps || data.n_years) - 1));
 
-    document.getElementById('current-year').textContent = 2010 + currentYearIndex;
-    document.getElementById('year-display').textContent = 2010 + currentYearIndex;
+    document.getElementById('current-year').textContent = data.step_labels ? data.step_labels[currentYearIndex] : (2010 + currentYearIndex);
+    document.getElementById('year-display').textContent = data.step_labels ? data.step_labels[currentYearIndex] : (2010 + currentYearIndex);
     document.getElementById('year-slider').value = currentYearIndex;
 
     const populations = data.site_timeseries.map(s => s.population[currentYearIndex]);
@@ -270,7 +270,7 @@ function updateStatistics(populations, diseases, resistances, initialPops) {
 }
 
 function setupControls() {
-    document.getElementById('year-slider').max = data.n_years - 1;
+    document.getElementById('year-slider').max = (data.total_steps || data.n_years) - 1;
     document.getElementById('play-btn').addEventListener('click', togglePlay);
     document.getElementById('step-back').addEventListener('click', () => stepYear(-1));
     document.getElementById('step-forward').addEventListener('click', () => stepYear(1));
@@ -324,7 +324,7 @@ function startPlay() {
     document.getElementById('play-btn').textContent = '⏸ Pause';
     document.getElementById('app').classList.add('playing');
     playInterval = setInterval(() => {
-        if (currentYearIndex >= data.n_years - 1) { 
+        if (currentYearIndex >= (data.total_steps || data.n_years) - 1) { 
             stopPlay(); 
             return; 
         }
@@ -344,7 +344,7 @@ function stopPlay() {
 
 function stepYear(delta) {
     const n = currentYearIndex + delta;
-    if (n >= 0 && n < data.n_years) {
+    if (n >= 0 && n < (data.total_steps || data.n_years)) {
         updateVisualization(n);
     }
 }
