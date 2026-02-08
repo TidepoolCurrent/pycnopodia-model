@@ -109,6 +109,18 @@ BC_FJORDS = [
     RealSite("Belize Inlet", 51.10, -127.10, "bc_fjords", "fjord",
              sill_depth_m=20, base_temp_C=8.0),
     
+    # Southern BC / Discovery Islands transition zone
+    # These sites bridge the Salish Sea and BC Central Coast
+    RealSite("Discovery Islands", 50.25, -125.30, "bc_fjords", "island",
+             base_temp_C=8.5,
+             notes="Campbell River area, gateway between Salish Sea and open BC coast"),
+    RealSite("Johnstone Strait", 50.50, -126.30, "bc_fjords", "inland_sea",
+             base_temp_C=8.5,
+             notes="Major tidal channel connecting Georgia Strait to Queen Charlotte Strait"),
+    RealSite("Queen Charlotte Strait", 50.80, -127.00, "bc_fjords", "inland_sea",
+             base_temp_C=8.5,
+             notes="Northern end of Inside Passage, connects to open Pacific"),
+    
     # North Coast fjords
     RealSite("Douglas Channel", 53.50, -129.20, "bc_fjords", "fjord",
              sill_depth_m=100, base_temp_C=7.0, has_freshwater_lens=True,
