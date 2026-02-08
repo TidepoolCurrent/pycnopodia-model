@@ -81,6 +81,10 @@ class GeoConfig:
     max_resistance_freq: float = 0.95
     resistance_effect: float = 0.70  # Max resistance at all loci fixed
     
+    # Endemic disease on open coast (persistent low-level SSWD post-acute)
+    endemic_coast_prevalence: float = 0.15  # Floor prevalence on open coast post-acute
+    endemic_coast_mortality: float = 0.20  # Annual endemic mortality on open coast (on top of natural)
+    
     # Temperature effects
     disease_temp_threshold: float = 10.0  # °C, below this disease severity reduced
     disease_temp_optimum: float = 15.0  # °C, peak disease severity
@@ -700,18 +704,21 @@ class GeoSimulation:
                             new_prev[i] = max(current * 0.97, 0.70)
                     else:
                         # Post-acute
-                        if density_ratio < 0.10:
-                            new_prev[i] = 0.0
-                            continue
-                        
                         if is_fjord and has_shallow_sill:
-                            # Fjord: disease clears more rapidly post-acute
+                            # Fjord: disease clears — geography blocks reinfection
+                            if density_ratio < 0.10:
+                                new_prev[i] = 0.0
+                                continue
                             decay = 0.50 * seasonal_disease_factor
                             new_prev[i] = current * (1 - decay)
                             if new_prev[i] < 0.01:
                                 new_prev[i] = 0.0
                         else:
-                            # Coast: density-dependent endemic
+                            # Open coast: endemic SSWD persists indefinitely
+                            # Pathogen is environmental/waterborne — no geographic barrier
+                            # Disease never fully clears on exposed coastline
+                            endemic_floor = self.config.endemic_coast_prevalence
+                            
                             neighbor_pressure = sum(
                                 self.disease_connectivity[j, i] * self.disease_prevalence[j] * 0.3
                                 for j in range(self.n_sites)
@@ -719,12 +726,13 @@ class GeoSimulation:
                             )
                             temp_mod = _temp_spread_modifier(self.temperatures[i], self.config)
                             sustained = (density_ratio * temp_mod * 0.4 + neighbor_pressure * 0.3) * seasonal_disease_factor
+                            sustained = max(sustained, endemic_floor)  # Never drops below endemic floor
                             sustained = min(sustained, 0.90)
                             
-                            decay_rate = 0.15  # Per season (faster than annual 0.7)
+                            decay_rate = 0.15
                             target = sustained + (current - sustained) * (1 - decay_rate)
                             new_prev[i] = np.clip(
-                                target + self.rng.normal(0, 0.01), 0.0, 0.95
+                                target + self.rng.normal(0, 0.01), endemic_floor * 0.5, 0.95
                             )
         
         self.disease_prevalence = new_prev
