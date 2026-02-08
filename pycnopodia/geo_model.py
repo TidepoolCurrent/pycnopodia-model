@@ -115,25 +115,59 @@ class GeoResult:
     disease_connectivity: np.ndarray
 
 
-def _seasonal_temperature(base_temp: float, step: int, config: GeoConfig, year_offset: float = 0.0) -> float:
+# Latitude-based seasonal SST offsets from annual mean (°C)
+# Based on NOAA buoy data and DFO station records
+# [Winter, Spring, Summer, Fall]
+_SEASONAL_SST_OFFSETS = [
+    (59, 61, [-2.5, -0.5, 3.0, 0.5]),   # PWS / Gulf of Alaska
+    (55, 59, [-2.5, -0.5, 3.5, 0.5]),   # SE Alaska
+    (52, 55, [-2.0,  0.0, 3.5, 0.5]),   # BC North Coast
+    (49, 52, [-2.5,  0.0, 4.0, 0.5]),   # BC Central/South
+    (47, 49, [-3.0, -0.5, 4.5, 1.0]),   # Salish Sea (semi-enclosed, larger range)
+    (43, 47, [-2.5, -0.5, 3.0, 1.0]),   # WA/OR (upwelling suppresses summer)
+    (39, 43, [-2.0, -0.5, 2.5, 1.0]),   # N California (strong upwelling)
+    (35, 39, [-2.0, -0.5, 3.0, 0.5]),   # C California
+    (29, 35, [-1.5, -0.5, 2.5, 0.5]),   # S California + Baja
+]
+
+
+def _get_seasonal_offset(lat: float, season: int) -> float:
+    """Get temperature offset from annual mean for latitude and season."""
+    for lat_min, lat_max, offsets in _SEASONAL_SST_OFFSETS:
+        if lat_min <= lat <= lat_max:
+            return offsets[season]
+    # Extrapolate for edge cases
+    if lat < 29:
+        return _SEASONAL_SST_OFFSETS[-1][2][season]
+    if lat > 61:
+        return _SEASONAL_SST_OFFSETS[0][2][season]
+    # Interpolate between bands
+    for i in range(len(_SEASONAL_SST_OFFSETS) - 1):
+        lo_min, lo_max, lo_offs = _SEASONAL_SST_OFFSETS[i]
+        hi_min, hi_max, hi_offs = _SEASONAL_SST_OFFSETS[i + 1]
+        if hi_max <= lat < lo_min:
+            frac = (lat - hi_max) / (lo_min - hi_max)
+            return hi_offs[season] + frac * (lo_offs[season] - hi_offs[season])
+    return 0.0
+
+
+def _seasonal_temperature(base_temp: float, step: int, config: GeoConfig, 
+                           year_offset: float = 0.0, lat: float = 50.0) -> float:
     """
-    Calculate temperature for a given season.
-    
-    Uses cosine cycle with peak in summer (season 2), trough in winter (season 0).
-    Formula: base_temp + amplitude * cos(2π * (season - 2) / 4)
+    Calculate temperature for a given season using latitude-based SST offsets.
     
     Args:
         base_temp: Base annual mean temperature
         step: Current timestep
-        config: Configuration with seasonal_temp_amplitude
-        year_offset: Climate warming offset (°C)
+        config: Configuration
+        year_offset: Climate warming + Blob offset (°C)
+        lat: Site latitude for seasonal offset lookup
     
     Returns:
         Temperature in °C
     """
     season = step % config.seasons_per_year
-    # Cosine with peak at season 2 (summer), trough at season 0 (winter)
-    seasonal_offset = config.seasonal_temp_amplitude * math.cos(2 * math.pi * (season - 2) / config.seasons_per_year)
+    seasonal_offset = _get_seasonal_offset(lat, season)
     return base_temp + seasonal_offset + year_offset
 
 
@@ -522,13 +556,14 @@ class GeoSimulation:
         elif year == 13:
             blob_anomaly = 0.5 if season in [SUMMER, FALL] else 0.3  # Fading
         
-        # Calculate seasonal temperatures
+        # Calculate seasonal temperatures using latitude-based SST offsets
         for i in range(self.n_sites):
             self.temperatures[i] = _seasonal_temperature(
                 self.base_temperatures[i], 
                 step, 
                 self.config, 
-                climate_offset + blob_anomaly
+                climate_offset + blob_anomaly,
+                lat=self.sites[i].lat
             )
     
     def _update_disease(self, step: int, year: int, season: int):
@@ -549,7 +584,7 @@ class GeoSimulation:
             FALL: 1.1      # Still active
         }[season]
         
-        if years_since_onset == 0 and season == SUMMER:
+        if years_since_onset == 0 and season >= SUMMER:  # Onset in summer, spreads through fall
             # Initial outbreak — The Blob made SSWD nearly universal in summer
             # Even cold-water sites got hit (Hamilton shows 96% decline in SE AK)
             for i, site in enumerate(self.sites):
