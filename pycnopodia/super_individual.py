@@ -51,7 +51,7 @@ class SuperIndConfig:
     
     # Disease
     disease_onset_year: int = 10
-    disease_base_mortality: float = 0.90  # Annual
+    disease_base_mortality: float = 0.85  # Annual (slightly lower than mean-field to compensate for stochastic variance)
     disease_acute_years: int = 3
     disease_transmission_rate: float = 1.50
     
@@ -61,10 +61,10 @@ class SuperIndConfig:
     fjord_self_recruitment: float = 0.85
     
     # Sill/lens effects
-    sill_disease_reduction: float = 0.3
+    sill_disease_reduction: float = 0.5  # Stronger sill protection for stochastic model
     sill_depth_threshold: float = 50.0
-    freshwater_lens_disease_reduction: float = 0.5
-    freshwater_lens_mortality_reduction: float = 0.3
+    freshwater_lens_disease_reduction: float = 0.6  # Stronger lens protection 
+    freshwater_lens_mortality_reduction: float = 0.4  # Gehman 2025: lens is THE key mechanism
     
     # Genetics
     n_loci: int = 50
@@ -418,9 +418,9 @@ class SuperIndSimulation:
                 else:
                     base_prob = 0.3
                 if site.has_freshwater_lens:
-                    base_prob *= 0.4  # Strong lens protection
+                    base_prob *= 0.25  # Very strong lens protection (Gehman 2025)
                 if site.site_type == "fjord" and site.sill_depth_m and site.sill_depth_m < self.config.sill_depth_threshold:
-                    base_prob *= 0.5  # Shallow sill blocks initial infection
+                    base_prob *= 0.3  # Shallow sill strongly blocks initial infection
                 infection_prob = base_prob
             else:
                 # Ongoing transmission
@@ -472,7 +472,7 @@ class SuperIndSimulation:
                 if site.has_freshwater_lens:
                     lens_red = self.config.freshwater_lens_mortality_reduction
                     if is_acute:
-                        mortality *= (1 - lens_red * 0.6)
+                        mortality *= (1 - lens_red * 0.7)  # Still protective during Blob
                     else:
                         mortality *= (1 - lens_red)
                 
