@@ -627,6 +627,10 @@ class GeoSimulation:
                 if seasons_exposed < 2:
                     base_prev *= (0.5 + 0.25 * seasons_exposed)
                 
+                # Freshwater lens reduces initial disease establishment
+                if site.has_freshwater_lens:
+                    base_prev *= 0.6  # Stars pushed deeper, less exposure
+                
                 new_prev[i] = base_prev
                 continue
         
@@ -764,7 +768,9 @@ class GeoSimulation:
                 # Effect is weaker during acute phase (less snowmelt, Blob conditions)
                 if site.has_freshwater_lens:
                     if is_acute:
-                        effective_mort *= (1 - self.config.freshwater_lens_mortality_reduction * 0.3)  # Weak during Blob
+                        # Gehman 2025: freshwater lens pushes stars into cold deep water
+                        # Still protective during Blob, just less so
+                        effective_mort *= (1 - self.config.freshwater_lens_mortality_reduction * 0.6)
                     else:
                         effective_mort *= (1 - self.config.freshwater_lens_mortality_reduction)
                 
