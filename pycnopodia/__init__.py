@@ -1,24 +1,18 @@
 """
 Pycnopodia helianthoides population model.
 
-Individual-based simulation integrating:
-- Sweepstakes reproductive success (Hedgecock & Pudovkin 2011)
-- Polygenic SSWD resistance (Schiebelhut et al. 2024)
+Site-based metapopulation simulation with:
+- Geographic realism (56 named Pacific Coast sites)
+- Fjord refugia with sill-depth and freshwater lens effects
+- Polygenic SSWD resistance evolution
 - Broadcast spawner Allee effects
-- Captive breeding and outplanting interventions
-- Environmental stochasticity and climate projections
-- Spatial structure and local interactions
+- Distance-based larval and disease connectivity
+- Marine heatwave (The Blob) disease trigger
 
 Reference: Weertman 2026
 """
 
-from .population import Population
-from .simulation import Simulation
 from .config import Config, DEFAULT_CONFIG
-from .environment import EnvironmentConfig, EnvironmentState
-from .spatial import SpatialConfig, SpatialPopulation
-from .srs import HierarchicalSRSConfig, HierarchicalSRS
-from .size_structured import SizeStructuredConfig, SizeStructuredPopulation
 from .real_data import (
     HISTORICAL_SST, 
     get_historical_sst,
@@ -35,23 +29,25 @@ from .pacific_coast import (
     RegionType,
     RegionConfig,
 )
+from .geo_model import (
+    GeoConfig,
+    GeoSimulation,
+    GeoResult,
+    GeoState,
+)
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __all__ = [
-    "Population", 
-    "Simulation", 
     "Config", 
     "DEFAULT_CONFIG",
-    "EnvironmentConfig",
-    "EnvironmentState", 
-    "SpatialConfig",
-    "SpatialPopulation",
-    "HierarchicalSRSConfig",
-    "HierarchicalSRS",
     "PacificCoastConfig",
     "PacificCoastSimulation",
     "PacificCoastResult",
     "PACIFIC_COAST_REGIONS",
     "REGION_ORDER",
     "RegionType",
+    "GeoConfig",
+    "GeoSimulation",
+    "GeoResult",
+    "GeoState",
 ]
