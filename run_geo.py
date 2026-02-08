@@ -228,7 +228,7 @@ def export_dashboard_json(result, sites, config, output_path="dashboard/data.jso
     n_sites = len(sites)
     n_steps = len(result.states)
     seasons = ["Winter", "Spring", "Summer", "Fall"]
-    start_year = 2010
+    start_year = 2003  # Y0=2003, so Y10=2013 (SSWD onset)
     
     # Step labels
     step_labels = []

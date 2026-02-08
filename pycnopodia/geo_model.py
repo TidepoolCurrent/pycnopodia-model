@@ -586,19 +586,52 @@ class GeoSimulation:
             FALL: 1.1      # Still active
         }[season]
         
-        if years_since_onset == 0 and season >= SUMMER:  # Onset in summer, spreads through fall
-            # Initial outbreak — The Blob made SSWD nearly universal in summer
-            # Even cold-water sites got hit (Hamilton shows 96% decline in SE AK)
-            for i, site in enumerate(self.sites):
-                temp = self.temperatures[i]  # Already includes Blob anomaly
+        # Geographic disease spread: SSWD first detected ~47°N (WA/BC) in summer 2013
+        # Spread south to California by fall 2013, north to Alaska by 2014-2015
+        # Epicenter latitude
+        epicenter_lat = 47.5  # Washington coast
+        
+        for i, site in enumerate(self.sites):
+            lat = site.lat
+            dist_from_epicenter = abs(lat - epicenter_lat)
+            
+            # Arrival delay: ~1 season per 5° latitude from epicenter
+            # WA/BC (45-50°N): immediate; CA (33-42°N): 1-2 seasons; AK (55-61°N): 2-4 seasons
+            arrival_delay_seasons = dist_from_epicenter / 5.0  # seasons
+            # Fjords get hit later (isolation)
+            if site.site_type == "fjord":
+                arrival_delay_seasons += 2.0
+                if site.has_freshwater_lens:
+                    arrival_delay_seasons += 1.0
+            
+            seasons_since_onset = years_since_onset * 4 + season - SUMMER  # SUMMER of onset year = 0
+            if seasons_since_onset < 0:
+                continue
+            
+            # Has disease arrived at this site yet?
+            seasons_exposed = seasons_since_onset - arrival_delay_seasons
+            if seasons_exposed < 0:
+                continue  # Disease hasn't reached here yet
+            
+            if self.disease_prevalence[i] < 0.1:
+                # Initial infection at this site
+                temp = self.temperatures[i]
                 if temp >= 9.0:
-                    new_prev[i] = 0.85 + self.rng.uniform(0, 0.10)
+                    base_prev = 0.80 + self.rng.uniform(0, 0.15)
                 elif temp >= 7.0:
-                    new_prev[i] = 0.70 + self.rng.uniform(0, 0.15)
+                    base_prev = 0.65 + self.rng.uniform(0, 0.15)
                 else:
-                    # Even the coldest sites get infected during The Blob
-                    new_prev[i] = 0.50 + self.rng.uniform(0, 0.20)
-        else:
+                    base_prev = 0.45 + self.rng.uniform(0, 0.20)
+                
+                # Ramp up over first 2 seasons of exposure
+                if seasons_exposed < 2:
+                    base_prev *= (0.5 + 0.25 * seasons_exposed)
+                
+                new_prev[i] = base_prev
+                continue
+        
+        # Now handle ongoing disease dynamics for already-infected sites
+        if True:
             for i, site in enumerate(self.sites):
                 current = self.disease_prevalence[i]
                 density_ratio = self.populations[i] / max(self.initial_populations[i], 1)

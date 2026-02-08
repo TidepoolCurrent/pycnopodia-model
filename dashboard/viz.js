@@ -19,9 +19,9 @@ const REGION_COLORS = {
     bc_outer: '#45b39d',
     salish_sea: '#7d3c98',
     wa_or_outer: '#e67e22',
-    n_california: '#e74c3c',
-    c_california: '#c0392b',
-    s_california: '#922b21',
+    n_california: '#e67e22',
+    c_california: '#d35400',
+    s_california: '#a04000',
 };
 
 const REGION_NAMES = {
@@ -187,7 +187,8 @@ function updateVisualization(yearIndex) {
         let color = REGION_COLORS[site.region] || '#888';
         if (disease > 0.01) {
             const baseColor = d3.color(color);
-            const diseaseColor = d3.rgb(255, 30, 30);
+            // Use bright magenta/pink for disease so it's visible on red (California) regions
+            const diseaseColor = d3.rgb(255, 0, 200);
             color = d3.interpolateRgb(baseColor, diseaseColor)(disease * 0.8);
         }
         
