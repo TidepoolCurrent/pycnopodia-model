@@ -745,6 +745,8 @@ class GeoSimulation:
         for i in range(self.n_sites):
             for l in range(self.config.n_loci):
                 resistance[i] += self.resistance_freqs[i, l] * self.locus_effects[l]
+        # Cap at max possible resistance (sum of locus_effects = resistance_effect)
+        np.clip(resistance, 0.0, self.config.resistance_effect, out=resistance)
         return resistance
     
     def _apply_selection(self, season: int):

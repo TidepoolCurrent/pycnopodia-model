@@ -222,11 +222,83 @@ def plot_map(results, sites, outdir):
     print(f"Saved: {outdir}/geo_map.png")
 
 
+def export_dashboard_json(result, sites, config, output_path="dashboard/data.json"):
+    """Export simulation result to dashboard JSON format."""
+    import json
+    n_sites = len(sites)
+    n_steps = len(result.states)
+    seasons = ["Winter", "Spring", "Summer", "Fall"]
+    start_year = 2010
+    
+    # Step labels
+    step_labels = []
+    for step in range(n_steps):
+        year = start_year + step // 4
+        season = seasons[step % 4]
+        step_labels.append(f"{year} {season}")
+    
+    # Site info
+    site_data = []
+    for s in sites:
+        site_data.append({
+            "name": s.name, "lat": s.lat, "lon": s.lon,
+            "region": s.region, "site_type": s.site_type,
+            "sill_depth": s.sill_depth_m, "has_freshwater_lens": s.has_freshwater_lens,
+            "base_temp": s.base_temp_C
+        })
+    
+    # Site timeseries
+    site_timeseries = []
+    for i in range(n_sites):
+        pops = [float(result.states[t].populations[i]) for t in range(n_steps)]
+        prevs = [float(result.states[t].disease_prevalence[i]) for t in range(n_steps)]
+        res = [float(result.states[t].resistance_freqs[i].mean()) for t in range(n_steps)]
+        site_timeseries.append({"population": pops, "prevalence": prevs, "resistance": res})
+    
+    # Region timeseries
+    regions = sorted(set(s.region for s in sites))
+    region_timeseries = {}
+    for region in regions:
+        ridx = [i for i, s in enumerate(sites) if s.region == region]
+        pops = [sum(result.states[t].populations[i] for i in ridx) for t in range(n_steps)]
+        prevs = [float(np.mean([result.states[t].disease_prevalence[i] for i in ridx])) for t in range(n_steps)]
+        res_vals = [float(np.mean([result.states[t].resistance_freqs[i].mean() for i in ridx])) for t in range(n_steps)]
+        region_timeseries[region] = {"population": pops, "prevalence": prevs, "resistance": res_vals}
+    
+    # Connectivity (sparse - only links > 0.001)
+    from pycnopodia.geo_model import GeoSimulation
+    sim = GeoSimulation(config=config, sites=sites, seed=0)
+    larval = sim.larval_connectivity.tolist()
+    disease = sim.disease_connectivity.tolist()
+    
+    data = {
+        "model": "geo_model",
+        "n_years": config.n_years,
+        "n_sites": n_sites,
+        "seasons_per_year": 4,
+        "total_steps": n_steps,
+        "sites": site_data,
+        "regions": regions,
+        "region_timeseries": region_timeseries,
+        "site_timeseries": site_timeseries,
+        "larval_connectivity": larval,
+        "disease_connectivity": disease,
+        "step_labels": step_labels,
+        "years": list(range(n_steps))
+    }
+    
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, 'w') as f:
+        json.dump(data, f)
+    print(f"Dashboard data exported to {output_path} ({os.path.getsize(output_path)/1e6:.1f} MB)")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--ensemble', type=int, default=5)
     parser.add_argument('--years', type=int, default=80)
     parser.add_argument('--dense', action='store_true', help='Use 200-site dense network')
+    parser.add_argument('--dashboard', action='store_true', help='Export dashboard data.json')
     args = parser.parse_args()
     
     outdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures', 'geo')
@@ -266,7 +338,8 @@ def main():
         final_ratios = []
         for result in results:
             init = sum(result.states[0].populations[i] for i in region_indices)
-            y17 = sum(result.states[17].populations[i] for i in region_indices)
+            y17_step = 17 * config.seasons_per_year  # Year 17, not step 17
+            y17 = sum(result.states[y17_step].populations[i] for i in region_indices)
             final = sum(result.states[-1].populations[i] for i in region_indices)
             y17_ratios.append(1 - y17/init if init > 0 else 1)
             final_ratios.append(final/init if init > 0 else 0)
@@ -277,6 +350,10 @@ def main():
               f"Final ratio={np.mean(final_ratios):.3f}±{np.std(final_ratios):.3f}")
     
     print("=" * 70)
+    
+    # Export dashboard data (use first run)
+    if args.dashboard or True:  # Always export for now
+        export_dashboard_json(results[0], sites, config)
 
 
 if __name__ == "__main__":
