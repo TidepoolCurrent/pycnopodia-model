@@ -370,6 +370,23 @@ BC_OUTER = [
     RealSite("Prince Rupert", 54.30, -130.30, "bc_outer", "outer_coast",
              base_temp_C=8.0,
              notes="Major port, bridges Douglas Channel to Portland Canal"),
+    # Infill sites
+    RealSite("Ucluelet", 48.94, -125.55, "bc_outer", "outer_coast",
+             base_temp_C=9.0, notes="Between Barkley Sound and Clayoquot Sound"),
+    RealSite("Esperanza Inlet", 49.87, -126.95, "bc_outer", "inland_sea",
+             base_temp_C=8.5, notes="Between Nootka and Kyuquot Sounds"),
+    RealSite("Cape Scott", 50.78, -128.43, "bc_outer", "outer_coast",
+             base_temp_C=8.5, notes="Northern tip of Vancouver Island"),
+    RealSite("Calvert Island", 51.65, -128.13, "bc_outer", "island",
+             base_temp_C=8.0, notes="Hakai Institute research site"),
+    RealSite("Bella Bella", 52.16, -128.15, "bc_outer", "outer_coast",
+             base_temp_C=8.0, notes="Heiltsuk territory, central coast"),
+    RealSite("Aristazabal Island", 52.50, -129.05, "bc_outer", "island",
+             base_temp_C=8.0, notes="Between Milbanke Sound and Princess Royal"),
+    RealSite("Banks Island", 53.40, -130.15, "bc_outer", "island",
+             base_temp_C=8.0, notes="Between Princess Royal and Haida Gwaii"),
+    RealSite("Dundas Island", 54.55, -130.90, "bc_outer", "island",
+             base_temp_C=8.0, notes="Near AK border, north of Prince Rupert"),
 ]
 
 # ============================================================
@@ -418,6 +435,17 @@ SALISH_SEA = [
              notes="25km long, Vancouver Island, 60+ year DFO time series"),
     RealSite("Finlayson Arm", 48.57, -123.53, "salish_sea", "fjord",
              sill_depth_m=50, base_temp_C=9.0),
+    # Infill sites
+    RealSite("Orcas Island", 48.68, -122.87, "salish_sea", "island",
+             base_temp_C=9.5, notes="Largest San Juan Island"),
+    RealSite("Anacortes", 48.50, -122.62, "salish_sea", "inland_sea",
+             base_temp_C=9.5, notes="Fidalgo Island, connects San Juans to mainland"),
+    RealSite("Nanaimo", 49.17, -123.93, "salish_sea", "inland_sea",
+             base_temp_C=9.5, notes="East Vancouver Island, central Georgia Strait"),
+    RealSite("Comox", 49.67, -124.93, "salish_sea", "inland_sea",
+             base_temp_C=9.0, notes="Northern Strait of Georgia"),
+    RealSite("Boundary Bay", 49.00, -122.90, "salish_sea", "inland_sea",
+             base_temp_C=10.0, notes="Canada-US border, shallow bay"),
 ]
 
 # ============================================================
@@ -445,6 +473,25 @@ WA_OR = [
     RealSite("Strait of Juan de Fuca", 48.20, -123.60, "wa_or_outer", "outer_coast",
              base_temp_C=9.5,
              notes="Connects Salish Sea to open Pacific, high tidal exchange"),
+    # Infill sites
+    RealSite("Westport", 46.89, -124.12, "wa_or_outer", "outer_coast",
+             base_temp_C=10.0, notes="Twin Harbors, south of Grays Harbor"),
+    RealSite("Long Beach Peninsula", 46.50, -124.05, "wa_or_outer", "outer_coast",
+             base_temp_C=10.0, notes="Willapa Bay area"),
+    RealSite("Cannon Beach", 45.88, -123.96, "wa_or_outer", "outer_coast",
+             base_temp_C=10.0, notes="Haystack Rock"),
+    RealSite("Newport", 44.63, -124.06, "wa_or_outer", "outer_coast",
+             base_temp_C=10.0, notes="Hatfield Marine Science Center"),
+    RealSite("Florence", 43.97, -124.10, "wa_or_outer", "outer_coast",
+             base_temp_C=10.0, notes="Oregon Dunes area"),
+    RealSite("Bandon", 43.12, -124.42, "wa_or_outer", "outer_coast",
+             base_temp_C=10.5, notes="Between Coos Bay and Cape Blanco"),
+    RealSite("Gold Beach", 42.41, -124.42, "wa_or_outer", "outer_coast",
+             base_temp_C=10.5, notes="Rogue River mouth"),
+    RealSite("Depoe Bay", 44.81, -124.06, "wa_or_outer", "outer_coast",
+             base_temp_C=10.0, notes="Rocky intertidal, whale watching"),
+    RealSite("Neah Bay", 48.37, -124.62, "wa_or_outer", "outer_coast",
+             base_temp_C=9.5, notes="NW tip of Olympic Peninsula, Makah"),
 ]
 
 # ============================================================
@@ -465,6 +512,15 @@ N_CALIFORNIA = [
              base_temp_C=11.0),
     RealSite("Point Arena", 38.95, -123.74, "n_california", "outer_coast",
              base_temp_C=11.0),
+    # Infill sites
+    RealSite("Shelter Cove", 40.02, -124.07, "n_california", "outer_coast",
+             base_temp_C=10.5, notes="Lost Coast, between Mendocino and Cape Mendocino"),
+    RealSite("Eureka", 40.80, -124.17, "n_california", "outer_coast",
+             base_temp_C=10.5, notes="Humboldt Bay"),
+    RealSite("Patrick's Point", 41.13, -124.16, "n_california", "outer_coast",
+             base_temp_C=10.5, notes="Rocky intertidal, between Trinidad and Eureka"),
+    RealSite("Fort Bragg", 39.45, -123.81, "n_california", "outer_coast",
+             base_temp_C=11.0, notes="MacKerricher State Park, kelp forests"),
 ]
 
 # ============================================================
@@ -489,6 +545,17 @@ C_CALIFORNIA = [
              notes="Bridges Santa Barbara Channel to Monterey"),
     RealSite("Morro Bay", 35.37, -120.86, "c_california", "outer_coast",
              base_temp_C=12.5),
+    # Infill sites
+    RealSite("Bodega Bay", 38.33, -123.05, "c_california", "outer_coast",
+             base_temp_C=11.5, notes="Bodega Marine Lab, between Pt Reyes and Pt Arena"),
+    RealSite("San Francisco Bay mouth", 37.81, -122.48, "c_california", "outer_coast",
+             base_temp_C=12.0, notes="Golden Gate area"),
+    RealSite("Año Nuevo", 37.11, -122.34, "c_california", "outer_coast",
+             base_temp_C=12.0, notes="Between Half Moon Bay and Santa Cruz"),
+    RealSite("Cambria", 35.56, -121.10, "c_california", "outer_coast",
+             base_temp_C=12.5, notes="Between Morro Bay and Big Sur"),
+    RealSite("Point Lobos", 36.52, -121.94, "c_california", "outer_coast",
+             base_temp_C=12.0, notes="State Reserve, kelp forests"),
 ]
 
 # ============================================================
@@ -503,6 +570,20 @@ S_CALIFORNIA = [
              base_temp_C=14.5),
     RealSite("La Jolla", 32.85, -117.27, "s_california", "outer_coast",
              base_temp_C=15.0),
+    RealSite("Point Loma", 32.67, -117.25, "s_california", "outer_coast",
+             base_temp_C=15.0, notes="Kelp forests, between La Jolla and Coronado"),
+    RealSite("Dana Point", 33.46, -117.71, "s_california", "outer_coast",
+             base_temp_C=14.5, notes="Between La Jolla and Palos Verdes"),
+    RealSite("Laguna Beach", 33.54, -117.79, "s_california", "outer_coast",
+             base_temp_C=14.5, notes="Rocky reef, Crystal Cove"),
+    RealSite("Catalina Island", 33.39, -118.42, "s_california", "island",
+             base_temp_C=14.5, notes="Major kelp forest habitat"),
+    RealSite("San Nicolas Island", 33.24, -119.50, "s_california", "island",
+             base_temp_C=14.0, notes="Outer Channel Islands, cooler water"),
+    RealSite("Ventura", 34.27, -119.27, "s_california", "outer_coast",
+             base_temp_C=14.0, notes="Between Channel Islands and Santa Barbara"),
+    RealSite("Point Conception", 34.45, -120.47, "s_california", "outer_coast",
+             base_temp_C=13.0, notes="Biogeographic boundary, cold upwelling"),
     RealSite("Coronado Islands", 32.42, -117.25, "s_california", "island",
              base_temp_C=15.5,
              notes="US/Mexico border area"),

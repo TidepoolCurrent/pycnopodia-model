@@ -42,7 +42,7 @@ class GeoConfig:
     seasons_per_year: int = 4  # Could theoretically go monthly (12) later
     
     # Population
-    base_density_per_site: int = 43000  # Base population per site (×1000; Gravem 2021: 6.1B total pre-SSWD)
+    base_density_per_site: int = 35000  # Base population per site (×1000; Gravem 2021: 6.1B total pre-SSWD)
     carrying_capacity_multiplier: float = 2.0
     survival_adult: float = 0.95  # Annual survival (converted to seasonal in code)
     survival_juvenile: float = 0.60  # Annual survival (converted to seasonal)
