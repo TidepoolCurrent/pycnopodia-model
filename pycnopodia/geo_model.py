@@ -1,13 +1,17 @@
 """
 Geography-based Pycnopodia simulation using real site coordinates.
 
+SEASONAL VERSION: Uses quarterly time steps (4 seasons per year) to model:
+- Winter spawning (broadcast spawning Dec-Feb)
+- Spring larval settlement
+- Summer disease peak (warmest water)
+- Fall disease persistence and pre-winter mortality
+
 Uses named sites from data/real_sites.py with:
 - Distance-based larval and disease connectivity
 - Sill-depth modulated disease transmission for fjords
 - Freshwater lens disease reduction
-- Site-specific temperatures
-
-This replaces the abstract 400-site model with ~56 real locations.
+- Site-specific temperatures with seasonal cycles
 """
 
 import numpy as np
@@ -22,19 +26,28 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.real_sites import ALL_SITES, RealSite, haversine_km
 from data.coastline import generate_full_site_network
 
+# Season constants
+WINTER = 0
+SPRING = 1
+SUMMER = 2
+FALL = 3
+
+SEASON_NAMES = ["Winter", "Spring", "Summer", "Fall"]
+
 
 @dataclass
 class GeoConfig:
     """Configuration for geography-based simulation."""
     n_years: int = 100
+    seasons_per_year: int = 4  # Could theoretically go monthly (12) later
     
     # Population
     base_density_per_site: int = 500  # Base population per site (scales with habitat quality)
     carrying_capacity_multiplier: float = 2.0
-    survival_adult: float = 0.95
-    survival_juvenile: float = 0.60
-    maturation_years: int = 3
-    recruitment_ratio: float = 0.35
+    survival_adult: float = 0.95  # Annual survival (converted to seasonal in code)
+    survival_juvenile: float = 0.60  # Annual survival (converted to seasonal)
+    maturation_years: int = 3  # Years to maturity (= 12 seasonal steps)
+    recruitment_ratio: float = 0.35  # Per spawning event
     
     # Allee effect
     allee_threshold: int = 50
@@ -42,7 +55,7 @@ class GeoConfig:
     
     # Disease
     disease_onset_year: int = 10  # Year 10 = 2013
-    disease_base_mortality: float = 0.90
+    disease_base_mortality: float = 0.90  # Per year (converted to seasonal)
     disease_acute_years: int = 3
     disease_transmission_rate: float = 1.50
     
@@ -70,12 +83,15 @@ class GeoConfig:
     # Temperature effects
     disease_temp_threshold: float = 10.0  # °C, below this disease severity reduced
     disease_temp_optimum: float = 15.0  # °C, peak disease severity
+    seasonal_temp_amplitude: float = 2.5  # °C, amplitude of seasonal variation
 
 
 @dataclass
 class GeoState:
-    """State snapshot for one timestep."""
-    year: int
+    """State snapshot for one timestep (seasonal)."""
+    step: int  # Absolute step number (0-319 for 80 years)
+    year: int  # Calendar year
+    season: int  # 0=Winter, 1=Spring, 2=Summer, 3=Fall
     populations: np.ndarray
     adults: np.ndarray
     juveniles: np.ndarray
@@ -83,6 +99,10 @@ class GeoState:
     resistance_freqs: np.ndarray  # (n_sites, n_loci)
     temperatures: np.ndarray
     locus_effects: np.ndarray
+    
+    def season_name(self) -> str:
+        """Return human-readable season name."""
+        return SEASON_NAMES[self.season]
 
 
 @dataclass 
@@ -93,6 +113,28 @@ class GeoResult:
     states: List[GeoState]
     larval_connectivity: np.ndarray
     disease_connectivity: np.ndarray
+
+
+def _seasonal_temperature(base_temp: float, step: int, config: GeoConfig, year_offset: float = 0.0) -> float:
+    """
+    Calculate temperature for a given season.
+    
+    Uses cosine cycle with peak in summer (season 2), trough in winter (season 0).
+    Formula: base_temp + amplitude * cos(2π * (season - 2) / 4)
+    
+    Args:
+        base_temp: Base annual mean temperature
+        step: Current timestep
+        config: Configuration with seasonal_temp_amplitude
+        year_offset: Climate warming offset (°C)
+    
+    Returns:
+        Temperature in °C
+    """
+    season = step % config.seasons_per_year
+    # Cosine with peak at season 2 (summer), trough at season 0 (winter)
+    seasonal_offset = config.seasonal_temp_amplitude * math.cos(2 * math.pi * (season - 2) / config.seasons_per_year)
+    return base_temp + seasonal_offset + year_offset
 
 
 def _temp_disease_modifier(temp: float, config: GeoConfig) -> float:
@@ -265,7 +307,7 @@ def build_disease_connectivity(sites: List[RealSite], config: GeoConfig) -> np.n
 
 
 class GeoSimulation:
-    """Geography-based Pycnopodia population simulation."""
+    """Geography-based Pycnopodia population simulation with seasonal time steps."""
     
     def __init__(self, config: GeoConfig = None, sites: List[RealSite] = None, 
                  seed: int = 42, use_dense: bool = False):
@@ -278,6 +320,14 @@ class GeoSimulation:
             self.sites = list(ALL_SITES)
         self.n_sites = len(self.sites)
         self.rng = np.random.default_rng(seed)
+        
+        # Compute seasonal survival rates from annual rates
+        # Annual survival S_annual → seasonal S_season = S_annual^(1/seasons_per_year)
+        self.survival_adult_seasonal = self.config.survival_adult ** (1.0 / self.config.seasons_per_year)
+        self.survival_juvenile_seasonal = self.config.survival_juvenile ** (1.0 / self.config.seasons_per_year)
+        
+        # Maturation: spread over seasons_per_year * maturation_years steps
+        self.maturation_steps = self.config.maturation_years * self.config.seasons_per_year
         
         # Initialize populations
         self._init_populations()
@@ -302,9 +352,12 @@ class GeoSimulation:
         raw = self.rng.dirichlet(np.ones(self.config.n_loci))
         self.locus_effects = raw * self.config.resistance_effect
         
-        # Temperatures (from site data + annual variation)
+        # Temperatures (from site data)
         self.base_temperatures = np.array([s.base_temp_C for s in self.sites])
         self.temperatures = self.base_temperatures.copy()
+        
+        # Larval pool for spring settlement (spawned in winter)
+        self.larval_pool = np.zeros(self.n_sites)
     
     def _init_populations(self):
         """Initialize populations based on site characteristics."""
@@ -343,15 +396,24 @@ class GeoSimulation:
             disease_connectivity=self.disease_connectivity,
         )
         
-        for year in range(self.config.n_years):
-            state = self._simulate_year(year)
+        total_steps = self.config.n_years * self.config.seasons_per_year
+        
+        for step in range(total_steps):
+            year = step // self.config.seasons_per_year
+            season = step % self.config.seasons_per_year
+            
+            state = self._simulate_season(step, year, season)
             result.states.append(state)
             
             if self.populations.sum() < 1:
-                # Pad remaining years
-                for y in range(year + 1, self.config.n_years):
+                # Pad remaining steps with zeros
+                for s in range(step + 1, total_steps):
+                    y = s // self.config.seasons_per_year
+                    seas = s % self.config.seasons_per_year
                     result.states.append(GeoState(
+                        step=s,
                         year=y,
+                        season=seas,
                         populations=np.zeros(self.n_sites),
                         adults=np.zeros(self.n_sites),
                         juveniles=np.zeros(self.n_sites),
@@ -364,45 +426,55 @@ class GeoSimulation:
         
         return result
     
-    def _simulate_year(self, year: int) -> GeoState:
-        """Simulate one year."""
+    def _simulate_season(self, step: int, year: int, season: int) -> GeoState:
+        """Simulate one seasonal timestep."""
+        self._current_step = step
         self._current_year = year
+        self._current_season = season
         
-        # 1. Natural mortality
-        self.adults *= self.config.survival_adult
-        self.juveniles *= self.config.survival_juvenile
+        # 1. Natural mortality (all seasons)
+        self.adults *= self.survival_adult_seasonal
+        self.juveniles *= self.survival_juvenile_seasonal
         
-        # 2. Temperature update (climate warming + marine heatwave)
-        self._update_temperatures(year)
+        # 2. Temperature update (seasonal cycle + climate warming)
+        self._update_temperatures(step, year, season)
         
-        # 3. Disease
+        # 3. Disease (active all seasons, but severity varies with temperature)
         if year >= self.config.disease_onset_year:
-            self._update_disease(year)
-            self._apply_disease_mortality()
+            self._update_disease(step, year, season)
+            self._apply_disease_mortality(season)
         
-        # 4. Selection
-        self._apply_selection()
+        # 4. Selection (stronger in summer when disease is worst)
+        self._apply_selection(season)
         
-        # 5. Maturation
-        maturing = self.juveniles / self.config.maturation_years
+        # 5. Maturation (gradual, all seasons)
+        # Juveniles mature gradually: 1/maturation_steps per season
+        maturing = self.juveniles / self.maturation_steps
         self.adults += maturing
         self.juveniles -= maturing
         
-        # 6. Reproduction + dispersal
-        recruits = self._reproduce()
-        settlers = self.larval_connectivity.T @ recruits
-        settlers *= self.rng.uniform(0.8, 1.2, self.n_sites)
+        # 6. Reproduction (WINTER ONLY - broadcast spawning)
+        if season == WINTER:
+            self.larval_pool = self._reproduce()
         
-        # Density dependence on settlement
-        density_effect = 1 - (self.populations / self.carrying_capacity)
-        density_effect = np.clip(density_effect, 0.1, 1.0)
-        settlers *= density_effect
-        settlers = np.maximum(settlers, 0)
-        
-        self.juveniles += settlers
-        
-        # 7. Update genetics from gene flow
-        self._update_genetics(recruits, settlers)
+        # 7. Larval settlement (SPRING ONLY - larvae settle after winter spawn)
+        if season == SPRING:
+            settlers = self.larval_connectivity.T @ self.larval_pool
+            settlers *= self.rng.uniform(0.8, 1.2, self.n_sites)
+            
+            # Density dependence on settlement
+            density_effect = 1 - (self.populations / self.carrying_capacity)
+            density_effect = np.clip(density_effect, 0.1, 1.0)
+            settlers *= density_effect
+            settlers = np.maximum(settlers, 0)
+            
+            self.juveniles += settlers
+            
+            # Update genetics from gene flow
+            self._update_genetics(self.larval_pool, settlers)
+            
+            # Clear larval pool
+            self.larval_pool = np.zeros(self.n_sites)
         
         # 8. Genetic drift
         self._apply_drift()
@@ -423,7 +495,9 @@ class GeoSimulation:
             self.juveniles = self.populations * (1 - adult_ratio)
         
         return GeoState(
+            step=step,
             year=year,
+            season=season,
             populations=self.populations.copy(),
             adults=self.adults.copy(),
             juveniles=self.juveniles.copy(),
@@ -433,27 +507,51 @@ class GeoSimulation:
             locus_effects=self.locus_effects.copy(),
         )
     
-    def _update_temperatures(self, year: int):
-        """Apply climate warming and marine heatwave anomaly."""
+    def _update_temperatures(self, step: int, year: int, season: int):
+        """Apply seasonal cycle + climate warming + The Blob anomaly."""
         warming_rate = 0.02  # °C per year
-        self.temperatures = self.base_temperatures + warming_rate * year
+        climate_offset = warming_rate * year
         
-        # The Blob (years 10-13)
+        # The Blob (years 10-13, strongest in summer/fall)
+        blob_anomaly = 0.0
         if 10 <= year <= 12:
-            self.temperatures += 2.0  # +2°C anomaly
+            if season in [SUMMER, FALL]:
+                blob_anomaly = 2.5  # Peak warming in summer/fall
+            else:
+                blob_anomaly = 1.5  # Weaker in winter/spring
         elif year == 13:
-            self.temperatures += 1.0  # Fading
+            blob_anomaly = 0.5 if season in [SUMMER, FALL] else 0.3  # Fading
+        
+        # Calculate seasonal temperatures
+        for i in range(self.n_sites):
+            self.temperatures[i] = _seasonal_temperature(
+                self.base_temperatures[i], 
+                step, 
+                self.config, 
+                climate_offset + blob_anomaly
+            )
     
-    def _update_disease(self, year: int):
-        """Update disease prevalence."""
+    def _update_disease(self, step: int, year: int, season: int):
+        """Update disease prevalence with seasonal dynamics."""
         years_since_onset = year - self.config.disease_onset_year
         new_prev = self.disease_prevalence.copy()
         is_acute = years_since_onset <= self.config.disease_acute_years
         
-        if years_since_onset == 0:
-            # Initial outbreak — The Blob made SSWD nearly universal
+        # Seasonal disease factor
+        # Winter: disease suppressed by cold
+        # Spring: moderate
+        # Summer: PEAK transmission
+        # Fall: still high
+        seasonal_disease_factor = {
+            WINTER: 0.5,   # Cold suppression
+            SPRING: 0.8,   # Moderate
+            SUMMER: 1.3,   # PEAK
+            FALL: 1.1      # Still active
+        }[season]
+        
+        if years_since_onset == 0 and season == SUMMER:
+            # Initial outbreak — The Blob made SSWD nearly universal in summer
             # Even cold-water sites got hit (Hamilton shows 96% decline in SE AK)
-            # The Blob adds +2°C, so most sites are now >7°C
             for i, site in enumerate(self.sites):
                 temp = self.temperatures[i]  # Already includes Blob anomaly
                 if temp >= 9.0:
@@ -474,6 +572,19 @@ class GeoSimulation:
                 has_shallow_sill = (site.sill_depth_m is not None and 
                                     site.sill_depth_m < self.config.sill_depth_threshold)
                 
+                # Winter clearance in cold water (especially fjords)
+                if season == WINTER and current > 0.1:
+                    if is_fjord and has_shallow_sill and self.temperatures[i] < 6.0:
+                        # Cold winter in protected fjord: disease clears significantly
+                        new_prev[i] = current * 0.4
+                        if new_prev[i] < 0.05:
+                            new_prev[i] = 0.0
+                        continue
+                    elif has_lens and self.temperatures[i] < 7.0:
+                        # Freshwater lens + cold: disease suppression
+                        new_prev[i] = current * 0.6
+                        continue
+                
                 if current < 0.1:
                     # Potential new infection
                     if density_ratio < 0.10:
@@ -489,7 +600,8 @@ class GeoSimulation:
                                 self.disease_connectivity[j, i] *
                                 self.disease_prevalence[j] *
                                 self.config.disease_transmission_rate *
-                                temp_mod
+                                temp_mod *
+                                seasonal_disease_factor
                             )
                     
                     infection_prob = 1.0 - math.exp(-pressure * 10.0)
@@ -507,10 +619,10 @@ class GeoSimulation:
                     if is_acute:
                         if is_fjord and has_shallow_sill:
                             # Fjord: disease decays during acute (isolation)
-                            new_prev[i] = max(current * 0.85, 0.20)
+                            new_prev[i] = max(current * 0.90, 0.20)
                         else:
                             # Open coast: stays high
-                            new_prev[i] = max(current * 0.95, 0.70)
+                            new_prev[i] = max(current * 0.97, 0.70)
                     else:
                         # Post-acute
                         if density_ratio < 0.10:
@@ -518,8 +630,9 @@ class GeoSimulation:
                             continue
                         
                         if is_fjord and has_shallow_sill:
-                            # Fjord: disease clears rapidly post-acute
-                            new_prev[i] = current * 0.30
+                            # Fjord: disease clears more rapidly post-acute
+                            decay = 0.50 * seasonal_disease_factor
+                            new_prev[i] = current * (1 - decay)
                             if new_prev[i] < 0.01:
                                 new_prev[i] = 0.0
                         else:
@@ -530,10 +643,10 @@ class GeoSimulation:
                                 if j != i and self.disease_prevalence[j] > 0.01
                             )
                             temp_mod = _temp_spread_modifier(self.temperatures[i], self.config)
-                            sustained = density_ratio * temp_mod * 0.4 + neighbor_pressure * 0.3
+                            sustained = (density_ratio * temp_mod * 0.4 + neighbor_pressure * 0.3) * seasonal_disease_factor
                             sustained = min(sustained, 0.90)
                             
-                            decay_rate = 0.7
+                            decay_rate = 0.15  # Per season (faster than annual 0.7)
                             target = sustained + (current - sustained) * (1 - decay_rate)
                             new_prev[i] = np.clip(
                                 target + self.rng.normal(0, 0.01), 0.0, 0.95
@@ -541,12 +654,27 @@ class GeoSimulation:
         
         self.disease_prevalence = new_prev
     
-    def _apply_disease_mortality(self):
-        """Apply disease mortality with site-specific modifiers."""
+    def _apply_disease_mortality(self, season: int):
+        """Apply disease mortality with site-specific and seasonal modifiers."""
         site_resistance = self._compute_site_resistance()
-        years_since = getattr(self, '_current_year', 0) - self.config.disease_onset_year
+        years_since = self._current_year - self.config.disease_onset_year
         is_acute = 0 <= years_since <= self.config.disease_acute_years
+        
+        # Seasonal mortality scaling (disease worse in summer/fall)
+        seasonal_mort_factor = {
+            WINTER: 0.7,   # Lower mortality in cold winter
+            SPRING: 0.9,   # Moderate
+            SUMMER: 1.3,   # PEAK mortality
+            FALL: 1.1      # Still elevated
+        }[season]
+        
+        # Acute phase multiplier
         acute_mult = 1.3 if is_acute else 1.0
+        
+        # Convert annual mortality to seasonal
+        # If annual mortality is M_year, seasonal is approximately M_season = 1 - (1 - M_year)^(1/4)
+        # For high mortality (0.90), this gives ~0.44 per season
+        base_seasonal_mort = 1.0 - (1.0 - self.config.disease_base_mortality) ** (1.0 / self.config.seasons_per_year)
         
         for i in range(self.n_sites):
             if self.disease_prevalence[i] > 0.01:
@@ -554,18 +682,18 @@ class GeoSimulation:
                 temp_mod = _temp_disease_modifier(self.temperatures[i], self.config)
                 
                 effective_mort = (
-                    self.config.disease_base_mortality *
+                    base_seasonal_mort *
                     temp_mod *
                     self.disease_prevalence[i] *
                     (1 - site_resistance[i]) *
-                    acute_mult
+                    acute_mult *
+                    seasonal_mort_factor
                 )
                 
                 # Freshwater lens reduces mortality (stars go deeper into cold water)
                 # Effect is weaker during acute phase (less snowmelt, Blob conditions)
                 if site.has_freshwater_lens:
-                    years_since = getattr(self, '_current_year', 0) - self.config.disease_onset_year
-                    if years_since <= self.config.disease_acute_years:
+                    if is_acute:
                         effective_mort *= (1 - self.config.freshwater_lens_mortality_reduction * 0.3)  # Weak during Blob
                     else:
                         effective_mort *= (1 - self.config.freshwater_lens_mortality_reduction)
@@ -582,12 +710,23 @@ class GeoSimulation:
                 resistance[i] += self.resistance_freqs[i, l] * self.locus_effects[l]
         return resistance
     
-    def _apply_selection(self):
-        """Frequency-dependent selection on resistance loci."""
+    def _apply_selection(self, season: int):
+        """Frequency-dependent selection on resistance loci (stronger in summer)."""
+        # Selection strongest when disease is most active (summer)
+        seasonal_selection_factor = {
+            WINTER: 0.5,
+            SPRING: 0.8,
+            SUMMER: 1.5,  # Strong selection in summer
+            FALL: 1.2
+        }[season]
+        
         for i in range(self.n_sites):
             if self.disease_prevalence[i] > 0.1:
                 temp_mod = _temp_disease_modifier(self.temperatures[i], self.config)
-                mortality = self.config.disease_base_mortality * temp_mod
+                
+                # Seasonal mortality for selection calculation
+                base_seasonal_mort = 1.0 - (1.0 - self.config.disease_base_mortality) ** (1.0 / self.config.seasons_per_year)
+                mortality = base_seasonal_mort * temp_mod * seasonal_selection_factor
                 prevalence = self.disease_prevalence[i]
                 
                 for l in range(self.config.n_loci):
@@ -605,7 +744,11 @@ class GeoSimulation:
                         )
     
     def _reproduce(self) -> np.ndarray:
-        """Reproduction with Allee effect."""
+        """
+        Reproduction with Allee effect (WINTER ONLY - broadcast spawning).
+        
+        Returns larval pool that will settle in spring.
+        """
         recruits = np.zeros(self.n_sites)
         for i in range(self.n_sites):
             n_adults = self.adults[i]
@@ -655,15 +798,19 @@ def run_geo_ensemble(n_runs: int = 10, config: GeoConfig = None) -> List[GeoResu
     for seed in range(n_runs):
         sim = GeoSimulation(config=config, seed=seed)
         results.append(sim.run())
-        print(f"  Run {seed+1}/{n_runs} complete")
+        total_steps = config.n_years * config.seasons_per_year
+        print(f"  Run {seed+1}/{n_runs} complete ({total_steps} seasonal steps)")
     return results
 
 
 if __name__ == "__main__":
-    print("Running geography-based Pycnopodia simulation...")
+    print("Running geography-based Pycnopodia simulation (SEASONAL)...")
     print(f"Sites: {len(ALL_SITES)}")
     
     config = GeoConfig(n_years=80)
+    total_steps = config.n_years * config.seasons_per_year
+    print(f"Total timesteps: {total_steps} ({config.n_years} years × {config.seasons_per_year} seasons)")
+    
     sim = GeoSimulation(config=config, seed=42)
     
     # Print connectivity check
@@ -675,15 +822,22 @@ if __name__ == "__main__":
     
     result = sim.run()
     
-    # Print results by region
+    # Print results by region (comparing year 0 vs year 17 vs year 79)
+    # Year indices in seasonal model: year N → steps N*4 through N*4+3
     print("\nResults by region:")
     regions = {}
     for i, site in enumerate(result.sites):
         if site.region not in regions:
             regions[site.region] = {"init": [], "y17": [], "y79": [], "sites": []}
-        regions[site.region]["init"].append(result.states[0].populations[i])
-        regions[site.region]["y17"].append(result.states[17].populations[i])
-        regions[site.region]["y79"].append(result.states[min(79, len(result.states)-1)].populations[i])
+        
+        # Year 0 winter (step 0), Year 17 fall (step 17*4+3=71), Year 79 fall (step 319)
+        step_y0 = 0
+        step_y17 = 17 * 4 + 3  # End of year 17
+        step_y79 = min(79 * 4 + 3, len(result.states) - 1)  # End of year 79
+        
+        regions[site.region]["init"].append(result.states[step_y0].populations[i])
+        regions[site.region]["y17"].append(result.states[step_y17].populations[i])
+        regions[site.region]["y79"].append(result.states[step_y79].populations[i])
         regions[site.region]["sites"].append(site)
     
     print(f"\n{'Region':<22} {'Sites':>5} {'Y0 Pop':>10} {'Y17 Decline':>12} {'Y79 Ratio':>10}")
@@ -702,12 +856,13 @@ if __name__ == "__main__":
             print(f"{region:<22} {n_sites:>3}({fjords}f) {init:>10.0f} {decline:>10.1f}% {ratio:>10.4f}")
     
     # Print individual fjord sites
-    print("\nFjord site details (year 79):")
+    print("\nFjord site details (year 79, fall):")
+    step_y79 = min(79 * 4 + 3, len(result.states) - 1)
     for i, site in enumerate(result.sites):
         if site.site_type == "fjord" and site.sill_depth_m and site.sill_depth_m < 50:
-            pop = result.states[min(79, len(result.states)-1)].populations[i]
+            pop = result.states[step_y79].populations[i]
             init = result.states[0].populations[i]
             ratio = pop/init if init > 0 else 0
-            prev = result.states[min(79, len(result.states)-1)].disease_prevalence[i]
-            res = result.states[min(79, len(result.states)-1)].resistance_freqs[i].mean()
+            prev = result.states[step_y79].disease_prevalence[i]
+            res = result.states[step_y79].resistance_freqs[i].mean()
             print(f"  {site.name:<30} pop={pop:>8.0f} ({ratio:.3f}) prev={prev:.3f} resist={res:.4f} sill={site.sill_depth_m}m {'🌊' if site.has_freshwater_lens else ''}")
