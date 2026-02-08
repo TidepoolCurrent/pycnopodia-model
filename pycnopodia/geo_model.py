@@ -119,6 +119,7 @@ class GeoResult:
 # Based on NOAA buoy data and DFO station records
 # [Winter, Spring, Summer, Fall]
 _SEASONAL_SST_OFFSETS = [
+    (61, 65, [-2.0, -0.5, 2.5, 0.5]),   # Aleutians (small range, maritime)
     (59, 61, [-2.5, -0.5, 3.0, 0.5]),   # PWS / Gulf of Alaska
     (55, 59, [-2.5, -0.5, 3.5, 0.5]),   # SE Alaska
     (52, 55, [-2.0,  0.0, 3.5, 0.5]),   # BC North Coast
@@ -128,6 +129,7 @@ _SEASONAL_SST_OFFSETS = [
     (39, 43, [-2.0, -0.5, 2.5, 1.0]),   # N California (strong upwelling)
     (35, 39, [-2.0, -0.5, 3.0, 0.5]),   # C California
     (29, 35, [-1.5, -0.5, 2.5, 0.5]),   # S California + Baja
+    (27, 29, [-1.0, -0.5, 2.0, 0.5]),   # Southern Baja (warm, small range)
 ]
 
 

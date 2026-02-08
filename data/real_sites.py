@@ -108,6 +108,57 @@ SE_ALASKA_NORTH = [
     RealSite("Yakutat Bay", 59.50, -139.80, "se_alaska_north", "fjord",
              sill_depth_m=60, base_temp_C=5.5, has_freshwater_lens=True,
              notes="Bridges SE AK to Gulf of Alaska"),
+    
+    # === Gulf of Alaska coast (bridging SE AK to PWS) ===
+    RealSite("Lituya Bay", 58.65, -137.50, "se_alaska_north", "fjord",
+             sill_depth_m=10, base_temp_C=5.5, has_freshwater_lens=True,
+             notes="Extremely shallow sill, famous for megatsunamis"),
+    RealSite("Icy Bay", 59.95, -141.40, "se_alaska_north", "fjord",
+             sill_depth_m=50, base_temp_C=5.0, has_freshwater_lens=True,
+             notes="Guyot/Tyndall glaciers, recently deglaciated"),
+    RealSite("Controller Bay", 60.15, -144.20, "se_alaska_north", "outer_coast",
+             base_temp_C=5.5,
+             notes="Between Yakutat and Cordova, Bering Glacier outflow"),
+    RealSite("Cordova / Orca Inlet", 60.55, -145.75, "se_alaska_north", "inland_sea",
+             base_temp_C=5.5, has_freshwater_lens=True,
+             notes="Copper River delta, links to PWS east"),
+    
+    # === Kenai Peninsula / Cook Inlet ===
+    RealSite("Seward (outer coast)", 59.90, -149.50, "se_alaska_north", "outer_coast",
+             base_temp_C=6.0,
+             notes="Gulf of Alaska side of Kenai Peninsula"),
+    RealSite("Aialik Bay", 59.75, -149.65, "se_alaska_north", "fjord",
+             sill_depth_m=80, base_temp_C=5.5, has_freshwater_lens=True,
+             notes="Kenai Fjords NP, tidewater glaciers"),
+    RealSite("Kenai outer coast", 59.50, -150.50, "se_alaska_north", "outer_coast",
+             base_temp_C=6.0),
+    RealSite("Lower Cook Inlet", 59.20, -152.00, "se_alaska_north", "inland_sea",
+             base_temp_C=6.5,
+             notes="Between Kenai and Kodiak, strong tidal mixing"),
+    
+    # === Kodiak Island ===
+    RealSite("Kodiak Island (east)", 57.80, -152.40, "se_alaska_north", "island",
+             base_temp_C=6.5,
+             notes="Large island, significant Pycnopodia habitat"),
+    RealSite("Kodiak Island (west)", 57.50, -154.00, "se_alaska_north", "island",
+             base_temp_C=6.0,
+             notes="Shelikof Strait side"),
+    
+    # === Aleutian Islands (western range limit) ===
+    RealSite("Unalaska / Dutch Harbor", 53.88, -166.53, "se_alaska_north", "island",
+             base_temp_C=5.0,
+             notes="Eastern Aleutians, confirmed Pycnopodia presence"),
+    RealSite("Akutan Island", 54.13, -165.77, "se_alaska_north", "island",
+             base_temp_C=5.0),
+    RealSite("Sanak Islands", 54.42, -162.77, "se_alaska_north", "island",
+             base_temp_C=5.5,
+             notes="Between Kodiak and Unalaska"),
+    RealSite("Sand Point / Shumagin Islands", 55.33, -160.50, "se_alaska_north", "island",
+             base_temp_C=5.5,
+             notes="Alaska Peninsula south side"),
+    RealSite("Chignik Bay", 56.30, -158.40, "se_alaska_north", "inland_sea",
+             base_temp_C=5.5,
+             notes="Alaska Peninsula, sheltered bay"),
 ]
 
 # ============================================================
@@ -469,6 +520,15 @@ S_CALIFORNIA = [
     RealSite("San Quintín", 30.50, -115.95, "s_california", "outer_coast",
              base_temp_C=16.5,
              notes="Baja California, upwelling zone, historical range"),
+    RealSite("Isla Cedros", 28.10, -115.20, "s_california", "island",
+             base_temp_C=17.0,
+             notes="Major upwelling zone, abalone/kelp habitat"),
+    RealSite("Punta Eugenia", 27.85, -115.08, "s_california", "outer_coast",
+             base_temp_C=17.0,
+             notes="Biogeographic boundary, southern range limit area"),
+    RealSite("Bahía Tortugas", 27.68, -114.90, "s_california", "outer_coast",
+             base_temp_C=17.5,
+             notes="Near southern historical Pycnopodia limit"),
 ]
 
 # ============================================================
