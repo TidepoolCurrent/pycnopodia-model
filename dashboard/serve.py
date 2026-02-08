@@ -30,7 +30,7 @@ def main():
     
     Handler = MyHTTPRequestHandler
     
-    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+    with socketserver.TCPServer(("0.0.0.0", PORT), Handler) as httpd:
         print(f"🌊 Pycnopodia Dashboard Server")
         print(f"━" * 50)
         print(f"Serving at: http://localhost:{PORT}")
