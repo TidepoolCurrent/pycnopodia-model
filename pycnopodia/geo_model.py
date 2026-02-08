@@ -781,11 +781,8 @@ class GeoSimulation:
     
     def _compute_site_resistance(self) -> np.ndarray:
         """Compute effective resistance per site from allele frequencies."""
-        resistance = np.zeros(self.n_sites)
-        for i in range(self.n_sites):
-            for l in range(self.config.n_loci):
-                resistance[i] += self.resistance_freqs[i, l] * self.locus_effects[l]
-        # Cap at max possible resistance (sum of locus_effects = resistance_effect)
+        # Vectorized: (n_sites, n_loci) @ (n_loci,) = (n_sites,)
+        resistance = self.resistance_freqs @ self.locus_effects
         np.clip(resistance, 0.0, self.config.resistance_effect, out=resistance)
         return resistance
     
@@ -799,28 +796,36 @@ class GeoSimulation:
             FALL: 1.2
         }[season]
         
-        for i in range(self.n_sites):
-            if self.disease_prevalence[i] > 0.1:
-                temp_mod = _temp_disease_modifier(self.temperatures[i], self.config)
-                
-                # Seasonal mortality for selection calculation
-                base_seasonal_mort = 1.0 - (1.0 - self.config.disease_base_mortality) ** (1.0 / self.config.seasons_per_year)
-                mortality = base_seasonal_mort * temp_mod * seasonal_selection_factor
-                prevalence = self.disease_prevalence[i]
-                
-                for l in range(self.config.n_loci):
-                    freq = self.resistance_freqs[i, l]
-                    effect = self.locus_effects[l]
-                    
-                    w_S = 1.0 - mortality * prevalence
-                    w_R = 1.0 - mortality * prevalence * (1.0 - effect)
-                    
-                    mean_w = freq * w_R + (1 - freq) * w_S
-                    if mean_w > 0:
-                        new_freq = freq * w_R / mean_w
-                        self.resistance_freqs[i, l] = np.clip(
-                            new_freq, 0.001, self.config.max_resistance_freq
-                        )
+        base_seasonal_mort = 1.0 - (1.0 - self.config.disease_base_mortality) ** (1.0 / self.config.seasons_per_year)
+        
+        # Vectorized selection across all diseased sites
+        diseased = self.disease_prevalence > 0.1
+        if not diseased.any():
+            return
+        
+        # Temperature modifiers for diseased sites
+        temp_mods = np.array([_temp_disease_modifier(self.temperatures[i], self.config) 
+                              for i in range(self.n_sites)])
+        
+        mortality = base_seasonal_mort * temp_mods * seasonal_selection_factor  # (n_sites,)
+        prevalence = self.disease_prevalence  # (n_sites,)
+        
+        # For each locus: w_S = 1 - mort*prev, w_R = 1 - mort*prev*(1-effect)
+        for l in range(self.config.n_loci):
+            effect = self.locus_effects[l]
+            freq = self.resistance_freqs[diseased, l]  # (n_diseased,)
+            m = mortality[diseased]
+            p = prevalence[diseased]
+            
+            w_S = 1.0 - m * p
+            w_R = 1.0 - m * p * (1.0 - effect)
+            mean_w = freq * w_R + (1 - freq) * w_S
+            
+            valid = mean_w > 0
+            new_freq = np.where(valid, freq * w_R / np.maximum(mean_w, 1e-10), freq)
+            self.resistance_freqs[diseased, l] = np.clip(
+                new_freq, 0.001, self.config.max_resistance_freq
+            )
     
     def _reproduce(self) -> np.ndarray:
         """
@@ -874,33 +879,36 @@ class GeoSimulation:
         """
         srs = self.config.srs_breeding_fraction
         
-        for i in range(self.n_sites):
-            if self.populations[i] <= 0:
-                continue
-            
-            # Effective population size
-            Ne = max(1, self.populations[i] * srs)
-            
-            for l in range(self.config.n_loci):
-                p = self.resistance_freqs[i, l]
-                # Wright-Fisher drift: variance = p(1-p)/(2*Ne), per season
-                drift_var = p * (1 - p) / (2 * Ne) * 0.25  # quarterly
-                if drift_var > 0:
-                    drift = self.rng.normal(0, math.sqrt(drift_var))
-                    self.resistance_freqs[i, l] = np.clip(
-                        p + drift, 0.001, self.config.max_resistance_freq
-                    )
-            
-            # Inbreeding depression: when Ne < 50, reduce survival
-            if Ne < 50 and Ne > 0:
-                # Inbreeding coefficient F ≈ 1/(2*Ne) per generation
-                F = min(1.0 / (2 * Ne), 0.5)
-                # Fitness reduction: W = 1 - B*F (B = inbreeding load, typically 5-10)
-                inbreeding_load = 6.0  # Moderate for marine invertebrates
-                fitness = max(0.5, 1.0 - inbreeding_load * F)
-                self.populations[i] *= fitness
-                self.adults[i] *= fitness
-                self.juveniles[i] *= fitness
+        # Vectorized drift across all sites and loci
+        Ne = np.maximum(1.0, self.populations * srs)  # (n_sites,)
+        
+        # Only apply to sites with population > 0
+        active = self.populations > 0
+        if not active.any():
+            return
+        
+        p = self.resistance_freqs  # (n_sites, n_loci)
+        # Drift variance: p(1-p)/(2*Ne) * 0.25 (quarterly)
+        Ne_expanded = Ne[:, np.newaxis]  # (n_sites, 1)
+        drift_var = p * (1 - p) / (2 * Ne_expanded) * 0.25
+        drift_var[~active] = 0  # Zero out inactive sites
+        
+        # Generate all drift at once
+        drift = self.rng.normal(0, 1, p.shape) * np.sqrt(np.maximum(drift_var, 0))
+        self.resistance_freqs = np.clip(
+            p + drift, 0.001, self.config.max_resistance_freq
+        )
+        self.resistance_freqs[~active] = p[~active]  # Preserve inactive sites
+        
+        # Inbreeding depression for sites with Ne < 50
+        inbreeding_mask = active & (Ne < 50) & (Ne > 0)
+        if inbreeding_mask.any():
+            F = np.minimum(1.0 / (2 * Ne[inbreeding_mask]), 0.5)
+            inbreeding_load = 6.0
+            fitness = np.maximum(0.5, 1.0 - inbreeding_load * F)
+            self.populations[inbreeding_mask] *= fitness
+            self.adults[inbreeding_mask] *= fitness
+            self.juveniles[inbreeding_mask] *= fitness
 
 
 def run_geo_ensemble(n_runs: int = 10, config: GeoConfig = None) -> List[GeoResult]:
