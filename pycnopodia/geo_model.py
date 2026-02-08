@@ -81,9 +81,12 @@ class GeoConfig:
     max_resistance_freq: float = 0.95
     resistance_effect: float = 0.70  # Max resistance at all loci fixed
     
-    # Endemic disease on open coast (persistent low-level SSWD post-acute)
-    endemic_coast_prevalence: float = 0.15  # Floor prevalence on open coast post-acute
-    endemic_coast_mortality: float = 0.20  # Annual endemic mortality on open coast (on top of natural)
+    # SIR disease model parameters
+    beta_local: float = 0.6       # Local (density-dependent) transmission rate per season
+    beta_env: float = 0.20        # Environmental reservoir transmission rate (KEY differentiator)
+    gamma_recovery: float = 0.03  # Recovery rate per season (SSWD mostly kills, few recover)
+    env_reservoir_decay: float = 0.92  # Seasonal persistence of environmental reservoir (0-1)
+    env_reservoir_shedding: float = 0.4  # Rate infected individuals shed into reservoir
     
     # Temperature effects
     disease_temp_threshold: float = 10.0  # °C, below this disease severity reduced
@@ -377,8 +380,12 @@ class GeoSimulation:
         self.larval_connectivity = build_larval_connectivity(self.sites, self.config)
         self.disease_connectivity = build_disease_connectivity(self.sites, self.config)
         
-        # Initialize disease
-        self.disease_prevalence = np.zeros(self.n_sites)
+        # Initialize SIR disease model
+        self.infected_fraction = np.zeros(self.n_sites)  # Fraction of pop that's infected
+        self.recovered_fraction = np.zeros(self.n_sites)  # Fraction that cleared (partial immunity)
+        self.env_reservoir = np.zeros(self.n_sites)       # Environmental pathogen load per site
+        # For backward compatibility, alias
+        self.disease_prevalence = self.infected_fraction
         
         # Initialize genetics
         self.resistance_freqs = np.full(
@@ -574,218 +581,232 @@ class GeoSimulation:
             )
     
     def _update_disease(self, step: int, year: int, season: int):
-        """Update disease prevalence with seasonal dynamics."""
+        """SIR disease model with environmental reservoir.
+        
+        Each site tracks:
+          - infected_fraction: proportion currently infected (= disease_prevalence)
+          - recovered_fraction: proportion that cleared infection (partial immunity)  
+          - env_reservoir: environmental pathogen load (persists in water/sediment/other hosts)
+        
+        Transmission:
+          new_infections = S × (β_local × I × temp_mod + β_env × E × temp_mod + neighbor_pressure)
+          where S = susceptible fraction, I = infected fraction, E = env reservoir
+        
+        Key mechanism:
+          - Open coast: env_reservoir persists (waterborne pathogen, no barrier)
+          - Fjords with shallow sills: env_reservoir decays to zero (sill blocks import)
+          - Freshwater lens: reduces both transmission and reservoir persistence
+        
+        This gives density-dependent endemic disease on open coast without 
+        injecting arbitrary prevalence floors.
+        """
         years_since_onset = year - self.config.disease_onset_year
-        new_prev = self.disease_prevalence.copy()
         is_acute = years_since_onset <= self.config.disease_acute_years
         
-        # Seasonal disease factor
-        # Winter: disease suppressed by cold
-        # Spring: moderate
-        # Summer: PEAK transmission
-        # Fall: still high
-        seasonal_disease_factor = {
-            WINTER: 0.5,   # Cold suppression
-            SPRING: 0.8,   # Moderate
-            SUMMER: 1.3,   # PEAK
-            FALL: 1.1      # Still active
+        # Seasonal transmission scaling
+        seasonal_factor = {
+            WINTER: 0.4,   # Cold suppresses transmission
+            SPRING: 0.8,
+            SUMMER: 1.4,   # PEAK — warm water, high pathogen activity
+            FALL: 1.2
         }[season]
         
-        # Geographic disease spread: SSWD first detected ~47°N (WA/BC) in summer 2013
-        # Spread south to California by fall 2013, north to Alaska by 2014-2015
-        # Epicenter latitude
+        # ── Geographic arrival (disease spreads from epicenter) ──
         epicenter_lat = 47.5  # Washington coast
+        seasons_since_onset = years_since_onset * 4 + season - SUMMER
         
         for i, site in enumerate(self.sites):
-            lat = site.lat
-            dist_from_epicenter = abs(lat - epicenter_lat)
-            
-            # Arrival delay: ~1 season per 5° latitude from epicenter
-            # WA/BC (45-50°N): immediate; CA (33-42°N): 1-2 seasons; AK (55-61°N): 2-4 seasons
-            arrival_delay_seasons = dist_from_epicenter / 5.0  # seasons
-            # Fjords get hit later (isolation)
-            if site.site_type == "fjord":
-                arrival_delay_seasons += 2.0
-                if site.has_freshwater_lens:
-                    arrival_delay_seasons += 1.0
-            
-            seasons_since_onset = years_since_onset * 4 + season - SUMMER  # SUMMER of onset year = 0
+            if self.infected_fraction[i] > 0.01 or self.env_reservoir[i] > 0.01:
+                continue  # Already infected/exposed
             if seasons_since_onset < 0:
                 continue
             
-            # Has disease arrived at this site yet?
-            seasons_exposed = seasons_since_onset - arrival_delay_seasons
-            if seasons_exposed < 0:
-                continue  # Disease hasn't reached here yet
-            
-            if self.disease_prevalence[i] < 0.1:
-                # Initial infection at this site
-                temp = self.temperatures[i]
-                if temp >= 9.0:
-                    base_prev = 0.80 + self.rng.uniform(0, 0.15)
-                elif temp >= 7.0:
-                    base_prev = 0.65 + self.rng.uniform(0, 0.15)
-                else:
-                    base_prev = 0.45 + self.rng.uniform(0, 0.20)
-                
-                # Ramp up over first 2 seasons of exposure
-                if seasons_exposed < 2:
-                    base_prev *= (0.5 + 0.25 * seasons_exposed)
-                
-                # Freshwater lens reduces initial disease establishment
+            dist = abs(site.lat - epicenter_lat)
+            arrival_delay = dist / 5.0  # ~1 season per 5° latitude
+            if site.site_type == "fjord":
+                arrival_delay += 2.0
                 if site.has_freshwater_lens:
-                    base_prev *= 0.6  # Stars pushed deeper, less exposure
-                
-                new_prev[i] = base_prev
-                continue
+                    arrival_delay += 1.0
+            
+            if seasons_since_onset - arrival_delay < 0:
+                continue  # Not yet reached
+            
+            # Seed initial infection
+            temp = self.temperatures[i]
+            if temp >= 9.0:
+                seed_inf = 0.70 + self.rng.uniform(0, 0.15)
+            elif temp >= 7.0:
+                seed_inf = 0.50 + self.rng.uniform(0, 0.15)
+            else:
+                seed_inf = 0.30 + self.rng.uniform(0, 0.15)
+            
+            if site.has_freshwater_lens:
+                seed_inf *= 0.6
+            
+            # Ramp over first 2 seasons
+            elapsed = seasons_since_onset - arrival_delay
+            if elapsed < 2:
+                seed_inf *= (0.5 + 0.25 * elapsed)
+            
+            self.infected_fraction[i] = seed_inf
+            self.env_reservoir[i] = seed_inf * 0.5  # Initial reservoir from sick animals
         
-        # Now handle ongoing disease dynamics for already-infected sites
-        if True:
-            for i, site in enumerate(self.sites):
-                current = self.disease_prevalence[i]
-                density_ratio = self.populations[i] / max(self.initial_populations[i], 1)
-                
-                # Fjord-specific disease dynamics
-                is_fjord = site.site_type == "fjord"
-                has_lens = site.has_freshwater_lens
-                has_shallow_sill = (site.sill_depth_m is not None and 
-                                    site.sill_depth_m < self.config.sill_depth_threshold)
-                
-                # Winter clearance in cold water (especially fjords)
-                if season == WINTER and current > 0.1:
-                    if is_fjord and has_shallow_sill and self.temperatures[i] < 6.0:
-                        # Cold winter in protected fjord: disease clears significantly
-                        new_prev[i] = current * 0.4
-                        if new_prev[i] < 0.05:
-                            new_prev[i] = 0.0
-                        continue
-                    elif has_lens and self.temperatures[i] < 7.0:
-                        # Freshwater lens + cold: disease suppression
-                        new_prev[i] = current * 0.6
-                        continue
-                
-                if current < 0.1:
-                    # Potential new infection
-                    if density_ratio < 0.10:
-                        new_prev[i] = 0.0
-                        continue
-                    
-                    # Transmission pressure from neighbors
-                    pressure = 0.0
-                    for j in range(self.n_sites):
-                        if self.disease_prevalence[j] > 0.1:
-                            temp_mod = _temp_spread_modifier(self.temperatures[j], self.config)
-                            pressure += (
-                                self.disease_connectivity[j, i] *
-                                self.disease_prevalence[j] *
-                                self.config.disease_transmission_rate *
-                                temp_mod *
-                                seasonal_disease_factor
-                            )
-                    
-                    infection_prob = 1.0 - math.exp(-pressure * 10.0)
-                    
-                    # Fjord protection during post-acute
-                    if not is_acute and is_fjord and has_shallow_sill:
-                        infection_prob *= 0.1  # Sill blocks reinfection
-                    if has_lens:
-                        infection_prob *= (1 - self.config.freshwater_lens_disease_reduction)
-                    
-                    if self.rng.random() < infection_prob:
-                        new_prev[i] = 0.60 + self.rng.uniform(0, 0.20)
-                else:
-                    # Existing infection dynamics
-                    if is_acute:
-                        if is_fjord and has_shallow_sill:
-                            # Fjord: disease decays during acute (isolation)
-                            new_prev[i] = max(current * 0.90, 0.20)
-                        else:
-                            # Open coast: stays high
-                            new_prev[i] = max(current * 0.97, 0.70)
-                    else:
-                        # Post-acute
-                        if is_fjord and has_shallow_sill:
-                            # Fjord: disease clears — geography blocks reinfection
-                            if density_ratio < 0.10:
-                                new_prev[i] = 0.0
-                                continue
-                            decay = 0.50 * seasonal_disease_factor
-                            new_prev[i] = current * (1 - decay)
-                            if new_prev[i] < 0.01:
-                                new_prev[i] = 0.0
-                        else:
-                            # Open coast: endemic SSWD persists indefinitely
-                            # Pathogen is environmental/waterborne — no geographic barrier
-                            # Disease never fully clears on exposed coastline
-                            endemic_floor = self.config.endemic_coast_prevalence
-                            
-                            neighbor_pressure = sum(
-                                self.disease_connectivity[j, i] * self.disease_prevalence[j] * 0.3
-                                for j in range(self.n_sites)
-                                if j != i and self.disease_prevalence[j] > 0.01
-                            )
-                            temp_mod = _temp_spread_modifier(self.temperatures[i], self.config)
-                            sustained = (density_ratio * temp_mod * 0.4 + neighbor_pressure * 0.3) * seasonal_disease_factor
-                            sustained = max(sustained, endemic_floor)  # Never drops below endemic floor
-                            sustained = min(sustained, 0.90)
-                            
-                            decay_rate = 0.15
-                            target = sustained + (current - sustained) * (1 - decay_rate)
-                            new_prev[i] = np.clip(
-                                target + self.rng.normal(0, 0.01), endemic_floor * 0.5, 0.95
-                            )
+        # ── SIR dynamics for all sites ──
+        new_infected = self.infected_fraction.copy()
+        new_recovered = self.recovered_fraction.copy()
+        new_reservoir = self.env_reservoir.copy()
         
-        self.disease_prevalence = new_prev
+        site_resistance = self._compute_site_resistance()
+        
+        for i, site in enumerate(self.sites):
+            I = self.infected_fraction[i]
+            R = self.recovered_fraction[i]
+            S = max(0, 1.0 - I - R)  # Susceptible fraction
+            E = self.env_reservoir[i]
+            
+            if I < 0.001 and E < 0.001:
+                continue  # No disease at this site
+            
+            is_fjord = site.site_type == "fjord"
+            has_sill = (site.sill_depth_m is not None and 
+                       site.sill_depth_m < self.config.sill_depth_threshold)
+            has_lens = site.has_freshwater_lens
+            
+            temp_mod = _temp_disease_modifier(self.temperatures[i], self.config)
+            
+            # ── Transmission: new infections ──
+            # 1. Local density-dependent: β_local × I × S × temp × season
+            local_transmission = (self.config.beta_local * I * S * 
+                                 temp_mod * seasonal_factor)
+            
+            # 2. Environmental reservoir: β_env × E × S × temp × season
+            env_transmission = (self.config.beta_env * E * S * 
+                               temp_mod * seasonal_factor)
+            
+            # 3. Neighbor pressure (disease connectivity matrix)
+            neighbor_pressure = 0.0
+            for j in range(self.n_sites):
+                if j != i and self.infected_fraction[j] > 0.01:
+                    neighbor_pressure += (
+                        self.disease_connectivity[j, i] * 
+                        self.infected_fraction[j] * 0.1 *
+                        temp_mod * seasonal_factor
+                    )
+            
+            # Fjord protection: sill blocks environmental pathogen import
+            if is_fjord and has_sill:
+                env_transmission *= 0.05  # Sill blocks >95% of waterborne pathogen
+                neighbor_pressure *= 0.10  # Sill blocks neighbor transmission
+            if has_lens:
+                env_transmission *= (1 - self.config.freshwater_lens_disease_reduction)
+                local_transmission *= 0.85  # Stars in deeper cold water, less contact
+            
+            # Resistance reduces susceptibility
+            resistance = site_resistance[i]
+            susceptibility = 1.0 - resistance
+            
+            total_new_inf = (local_transmission + env_transmission + neighbor_pressure) * susceptibility
+            total_new_inf = min(total_new_inf, S)  # Can't exceed susceptible pool
+            
+            # ── Recovery ──
+            # In fjords: animals that survive acute phase can clear infection
+            # (lower pathogen pressure once reservoir decays)
+            # On open coast: recovery is rare (constant reexposure)
+            recovery = self.config.gamma_recovery * I
+            if self.temperatures[i] < 8.0:
+                recovery *= 1.5  # Cold water slows pathogen
+            if is_fjord and has_sill:
+                recovery *= 4.0  # Protected fjords: much higher clearance
+                if has_lens:
+                    recovery *= 2.0  # Freshwater lens + cold = best clearance
+            
+            # ── Waning immunity: recovered → susceptible ──
+            # SSWD doesn't confer durable immunity — survivors get reinfected
+            waning = R * 0.08  # ~8% per season lose immunity (~3 season half-life)
+            
+            # ── Update SIR ──
+            new_infected[i] = max(0, I + total_new_inf - recovery)
+            new_recovered[i] = max(0, R + recovery - waning)
+            # Ensure S + I + R <= 1
+            if new_infected[i] + new_recovered[i] > 1.0:
+                excess = new_infected[i] + new_recovered[i] - 1.0
+                new_recovered[i] -= excess  # Trim recovered
+            
+            # ── Environmental reservoir dynamics ──
+            # Infected animals shed pathogen into environment
+            # Shedding scales with ABSOLUTE infected population (not just fraction)
+            # Normalized by initial population so reservoir scales with host density
+            abs_infected = self.populations[i] * I
+            abs_initial = max(self.initial_populations[i], 1)
+            density_shedding = abs_infected / abs_initial  # 0-1 scale
+            shedding = self.config.env_reservoir_shedding * density_shedding * temp_mod
+            # Reservoir decays
+            decay = self.config.env_reservoir_decay
+            
+            # Fjords with sills: reservoir decays MUCH faster (isolated water body)
+            # Sill blocks resupply of waterborne pathogen from open ocean
+            if is_fjord and has_sill:
+                decay = 0.3  # Reservoir clears in ~2 seasons (vs years on open coast)
+            elif is_fjord:
+                decay *= 0.7
+            if has_lens:
+                decay *= 0.7  # Freshwater dilutes pathogen
+            
+            new_reservoir[i] = E * decay + shedding
+            
+            # Acute phase: extra environmental seeding (massive die-offs pollute water)
+            if is_acute:
+                new_reservoir[i] += 0.1 * temp_mod * seasonal_factor
+            
+            new_reservoir[i] = min(new_reservoir[i], 2.0)  # Cap reservoir
+        
+        self.infected_fraction = np.clip(new_infected, 0, 0.99)
+        self.recovered_fraction = np.clip(new_recovered, 0, 0.99)
+        self.env_reservoir = np.clip(new_reservoir, 0, 2.0)
+        self.disease_prevalence = self.infected_fraction  # Alias for compatibility
     
     def _apply_disease_mortality(self, season: int):
-        """Apply disease mortality with site-specific and seasonal modifiers."""
+        """Apply mortality to infected individuals.
+        
+        Mortality is proportional to infected fraction × disease severity.
+        Not all infected die — mortality rate reflects SSWD lethality.
+        """
         site_resistance = self._compute_site_resistance()
         years_since = self._current_year - self.config.disease_onset_year
         is_acute = 0 <= years_since <= self.config.disease_acute_years
         
-        # Seasonal mortality scaling (disease worse in summer/fall)
         seasonal_mort_factor = {
-            WINTER: 0.7,   # Lower mortality in cold winter
-            SPRING: 0.9,   # Moderate
-            SUMMER: 1.3,   # PEAK mortality
-            FALL: 1.1      # Still elevated
+            WINTER: 0.7, SPRING: 0.9, SUMMER: 1.3, FALL: 1.1
         }[season]
         
-        # Acute phase multiplier
         acute_mult = 1.3 if is_acute else 1.0
-        
-        # Convert annual mortality to seasonal
-        # If annual mortality is M_year, seasonal is approximately M_season = 1 - (1 - M_year)^(1/4)
-        # For high mortality (0.90), this gives ~0.44 per season
         base_seasonal_mort = 1.0 - (1.0 - self.config.disease_base_mortality) ** (1.0 / self.config.seasons_per_year)
         
         for i in range(self.n_sites):
-            if self.disease_prevalence[i] > 0.01:
-                site = self.sites[i]
-                temp_mod = _temp_disease_modifier(self.temperatures[i], self.config)
-                
-                effective_mort = (
-                    base_seasonal_mort *
-                    temp_mod *
-                    self.disease_prevalence[i] *
-                    (1 - site_resistance[i]) *
-                    acute_mult *
-                    seasonal_mort_factor
-                )
-                
-                # Freshwater lens reduces mortality (stars go deeper into cold water)
-                # Effect is weaker during acute phase (less snowmelt, Blob conditions)
-                if site.has_freshwater_lens:
-                    if is_acute:
-                        # Gehman 2025: freshwater lens pushes stars into cold deep water
-                        # Still protective during Blob, just less so
-                        effective_mort *= (1 - self.config.freshwater_lens_mortality_reduction * 0.6)
-                    else:
-                        effective_mort *= (1 - self.config.freshwater_lens_mortality_reduction)
-                
-                survival = np.clip(1 - effective_mort, 0.01, 1.0)
-                self.adults[i] *= survival
-                self.juveniles[i] *= survival
+            I = self.infected_fraction[i]
+            if I < 0.01:
+                continue
+            
+            site = self.sites[i]
+            temp_mod = _temp_disease_modifier(self.temperatures[i], self.config)
+            
+            # Mortality applies to infected fraction of population
+            # effective_mort = base × temp × infected_fraction × (1-resistance) × acute × seasonal
+            effective_mort = (
+                base_seasonal_mort * temp_mod * I *
+                (1 - site_resistance[i]) * acute_mult * seasonal_mort_factor
+            )
+            
+            # Freshwater lens protection
+            if site.has_freshwater_lens:
+                lens_effect = self.config.freshwater_lens_mortality_reduction
+                if is_acute:
+                    lens_effect *= 0.6  # Weaker during Blob
+                effective_mort *= (1 - lens_effect)
+            
+            survival = np.clip(1 - effective_mort, 0.01, 1.0)
+            self.adults[i] *= survival
+            self.juveniles[i] *= survival
     
     def _compute_site_resistance(self) -> np.ndarray:
         """Compute effective resistance per site from allele frequencies."""
