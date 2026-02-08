@@ -63,6 +63,26 @@ SE_ALASKA_NORTH = [
              notes="Narrow, tidal rapids limit exchange"),
     RealSite("Juneau area", 58.30, -134.42, "se_alaska_north", "fjord",
              sill_depth_m=100, base_temp_C=6.5, has_freshwater_lens=True),
+    
+    # Prince William Sound — northernmost significant Pycnopodia habitat
+    RealSite("Prince William Sound (west)", 60.60, -148.20, "se_alaska_north", "fjord",
+             sill_depth_m=150, base_temp_C=5.0, has_freshwater_lens=True,
+             notes="Whittier/Passage Canal area, glacial fjords"),
+    RealSite("Prince William Sound (central)", 60.70, -147.00, "se_alaska_north", "inland_sea",
+             base_temp_C=5.5, has_freshwater_lens=True,
+             notes="Largest embayment in Gulf of Alaska"),
+    RealSite("Prince William Sound (east)", 60.50, -146.00, "se_alaska_north", "fjord",
+             sill_depth_m=80, base_temp_C=5.5, has_freshwater_lens=True,
+             notes="Cordova area, copper river delta influence"),
+    RealSite("Resurrection Bay", 60.00, -149.40, "se_alaska_north", "fjord",
+             sill_depth_m=100, base_temp_C=5.5, has_freshwater_lens=True,
+             notes="Seward, Alaska SeaLife Center"),
+    RealSite("Kachemak Bay", 59.60, -151.30, "se_alaska_north", "inland_sea",
+             base_temp_C=6.0,
+             notes="Homer area, KBNERR, strong tidal mixing"),
+    RealSite("Yakutat Bay", 59.50, -139.80, "se_alaska_north", "fjord",
+             sill_depth_m=60, base_temp_C=5.5, has_freshwater_lens=True,
+             notes="Bridges SE AK to Gulf of Alaska"),
 ]
 
 # ============================================================
@@ -143,9 +163,29 @@ BC_FJORDS = [
 ]
 
 # ============================================================
-# BC OUTER COAST (52-55°N, exposed)
+# BC OUTER COAST (48-55°N, exposed Pacific including Vancouver Island)
 # ============================================================
 BC_OUTER = [
+    # Vancouver Island outer coast — major exposed Pacific coastline
+    RealSite("Barkley Sound", 48.85, -125.30, "bc_outer", "inland_sea",
+             base_temp_C=9.0,
+             notes="Bamfield Marine Sciences Centre, Pacific Rim NP area"),
+    RealSite("Clayoquot Sound", 49.15, -125.90, "bc_outer", "inland_sea",
+             base_temp_C=9.0,
+             notes="Major inlet system on west Vancouver Island"),
+    RealSite("Nootka Sound", 49.60, -126.60, "bc_outer", "inland_sea",
+             base_temp_C=8.5,
+             notes="Central west coast Vancouver Island"),
+    RealSite("Kyuquot Sound", 50.00, -127.20, "bc_outer", "outer_coast",
+             base_temp_C=8.5,
+             notes="NW Vancouver Island"),
+    RealSite("Quatsino Sound", 50.50, -128.05, "bc_outer", "inland_sea",
+             base_temp_C=8.5,
+             notes="Northern tip Vancouver Island, connects to Queen Charlotte Strait"),
+    RealSite("Brooks Peninsula", 50.15, -127.80, "bc_outer", "outer_coast",
+             base_temp_C=8.5,
+             notes="Major biogeographic boundary, exposed headland"),
+    
     RealSite("Haida Gwaii (east)", 53.00, -131.80, "bc_outer", "island",
              base_temp_C=8.5, notes="Previously known as Queen Charlotte Is."),
     RealSite("Haida Gwaii (west)", 53.20, -132.80, "bc_outer", "outer_coast",
@@ -168,6 +208,15 @@ BC_OUTER = [
 SALISH_SEA = [
     RealSite("San Juan Islands", 48.55, -123.00, "salish_sea", "island",
              base_temp_C=9.5, notes="Friday Harbor Labs — human's institution!"),
+    RealSite("Saratoga Passage", 48.20, -122.55, "salish_sea", "inland_sea",
+             base_temp_C=10.0,
+             notes="Between Whidbey and Camano Islands, important Pycnopodia habitat"),
+    RealSite("Admiralty Inlet", 48.15, -122.75, "salish_sea", "inland_sea",
+             base_temp_C=9.5,
+             notes="Entrance to Puget Sound from Strait of Juan de Fuca"),
+    RealSite("Bellingham Bay", 48.75, -122.50, "salish_sea", "inland_sea",
+             base_temp_C=9.5,
+             notes="Northern Puget Sound, near BC border"),
     RealSite("Howe Sound", 49.40, -123.30, "salish_sea", "fjord",
              sill_depth_m=70, base_temp_C=9.0,
              notes="Fjord within Salish Sea, possible micro-refugium"),
@@ -269,6 +318,23 @@ S_CALIFORNIA = [
              base_temp_C=14.5),
     RealSite("La Jolla", 32.85, -117.27, "s_california", "outer_coast",
              base_temp_C=15.0),
+    RealSite("Coronado Islands", 32.42, -117.25, "s_california", "island",
+             base_temp_C=15.5,
+             notes="US/Mexico border area"),
+    
+    # Baja California — southern range limit
+    RealSite("Ensenada", 31.85, -116.62, "s_california", "outer_coast",
+             base_temp_C=16.0,
+             notes="Northern Baja, historically had Pycnopodia"),
+    RealSite("Isla Guadalupe", 29.05, -118.28, "s_california", "island",
+             base_temp_C=16.0,
+             notes="Offshore Baja island, southernmost confirmed Pycnopodia records"),
+    RealSite("Punta Banda", 31.72, -116.72, "s_california", "outer_coast",
+             base_temp_C=16.0,
+             notes="South of Ensenada, kelp forests"),
+    RealSite("San Quintín", 30.50, -115.95, "s_california", "outer_coast",
+             base_temp_C=16.5,
+             notes="Baja California, upwelling zone, historical range"),
 ]
 
 # ============================================================
