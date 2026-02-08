@@ -817,6 +817,8 @@ class GeoSimulation:
                         (old_w * self.resistance_freqs[j, locus] + new_w * settler_freq) /
                         (old_w + new_w)
                     )
+        # Clip all frequencies to valid range
+        np.clip(self.resistance_freqs, 0.001, self.config.max_resistance_freq, out=self.resistance_freqs)
     
     def _apply_drift(self):
         """Genetic drift in small populations."""
