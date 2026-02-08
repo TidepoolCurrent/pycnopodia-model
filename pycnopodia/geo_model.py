@@ -75,7 +75,7 @@ class GeoConfig:
     freshwater_lens_mortality_reduction: float = 0.3  # 30% less mortality (pushed to cold water)
     
     # Genetics
-    n_loci: int = 10
+    n_loci: int = 50
     initial_resistance_freq: float = 0.02
     max_resistance_freq: float = 0.95
     resistance_effect: float = 0.70  # Max resistance at all loci fixed
