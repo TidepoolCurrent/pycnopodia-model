@@ -950,10 +950,27 @@ class PacificCoastSimulation:
             for i in range(self.n_sites):
                 # Refugia protection: strong during acute phase, weakens over time
                 if i in self.refugia_sites:
-                    # Fjord pocket sites: bacteria can't cross fjord barriers
-                    # 2-week transmission cycle physically blocked by geography
-                    # These sites stay disease-free throughout
-                    new_prevalence[i] = 0.0
+                    # Fjord pocket sites: bacteria reaches them during acute phase
+                    # (waterborne pathogen is everywhere during initial outbreak)
+                    # BUT post-acute, geographic isolation breaks reinfection cycle:
+                    # - 2-week bacterial transmission cycle can't bridge fjord barriers
+                    # - No sustained external disease pressure
+                    # - Local disease burns through and dies out
+                    if is_acute:
+                        # Acute phase: pockets get hit, but at reduced intensity
+                        # (cold water + geographic distance from epicenter)
+                        if years_since_onset == 1 and self.disease_prevalence[i] < 0.1:
+                            # First exposure - delayed and reduced
+                            new_prevalence[i] = 0.40 + self.rng.uniform(0, 0.20)  # 40-60%
+                        else:
+                            # Sustaining but declining (no external reinfection pressure)
+                            new_prevalence[i] = max(self.disease_prevalence[i] * 0.80, 0.15)
+                    else:
+                        # Post-acute: disease rapidly dies out in isolated pockets
+                        # No external reinfection = local pathogen exhaustion
+                        new_prevalence[i] = self.disease_prevalence[i] * 0.30  # Fast decay
+                        if new_prevalence[i] < 0.01:
+                            new_prevalence[i] = 0.0
                     continue
                 
                 if self.disease_prevalence[i] < 0.1:
