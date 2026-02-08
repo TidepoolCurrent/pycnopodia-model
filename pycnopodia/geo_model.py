@@ -20,6 +20,7 @@ import os
 # Add parent dir to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.real_sites import ALL_SITES, RealSite, haversine_km
+from data.coastline import generate_full_site_network
 
 
 @dataclass
@@ -266,9 +267,15 @@ def build_disease_connectivity(sites: List[RealSite], config: GeoConfig) -> np.n
 class GeoSimulation:
     """Geography-based Pycnopodia population simulation."""
     
-    def __init__(self, config: GeoConfig = None, sites: List[RealSite] = None, seed: int = 42):
+    def __init__(self, config: GeoConfig = None, sites: List[RealSite] = None, 
+                 seed: int = 42, use_dense: bool = False):
         self.config = config or GeoConfig()
-        self.sites = sites or list(ALL_SITES)
+        if sites is not None:
+            self.sites = sites
+        elif use_dense:
+            self.sites = generate_full_site_network()
+        else:
+            self.sites = list(ALL_SITES)
         self.n_sites = len(self.sites)
         self.rng = np.random.default_rng(seed)
         

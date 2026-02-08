@@ -226,16 +226,26 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--ensemble', type=int, default=5)
     parser.add_argument('--years', type=int, default=80)
+    parser.add_argument('--dense', action='store_true', help='Use 200-site dense network')
     args = parser.parse_args()
     
     outdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures', 'geo')
     os.makedirs(outdir, exist_ok=True)
     
     config = GeoConfig(n_years=args.years)
-    sites = list(ALL_SITES)
+    if args.dense:
+        from data.coastline import generate_full_site_network
+        sites = generate_full_site_network()
+    else:
+        sites = list(ALL_SITES)
     
     print(f"Running {args.ensemble}-seed ensemble ({args.years} years, {len(sites)} sites)...")
-    results = run_geo_ensemble(n_runs=args.ensemble, config=config)
+    from pycnopodia.geo_model import GeoSimulation
+    results = []
+    for seed in range(args.ensemble):
+        sim = GeoSimulation(config=config, sites=sites, seed=seed)
+        results.append(sim.run())
+        print(f"  Run {seed+1}/{args.ensemble} complete")
     
     print("\nGenerating figures...")
     plot_ensemble_trajectories(results, sites, outdir)
